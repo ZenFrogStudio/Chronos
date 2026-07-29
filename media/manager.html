@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; style-src {{cspSource}}; script-src 'nonce-{{nonce}}'; img-src {{cspSource}} data:;"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link href="{{styleUri}}" rel="stylesheet" />
+    <title>Chronus</title>
+  </head>
+  <body>
+    <div id="setup" class="banner" hidden></div>
+    <div id="notice" class="notice" hidden></div>
+
+    <div id="drop-overlay" class="drop-overlay" aria-hidden="true">
+      <p class="drop-overlay-title">Drop Markdown files to schedule them</p>
+    </div>
+
+    <main class="shell">
+      <aside class="library">
+        <header class="library-head">
+          <h1 class="library-title">Plan library</h1>
+          <div class="library-actions">
+            <button id="new-plan" class="button" type="button">New plan</button>
+            <button id="import-plan" class="button is-quiet" type="button" title="Copy existing .md files into the library">Import</button>
+          </div>
+          <input id="search" class="search" type="search" placeholder="Search plans" aria-label="Search plans" />
+        </header>
+        <div id="plan-list" class="plan-list"></div>
+        <footer class="library-foot">
+          <button id="reveal-library" class="link-button" type="button">Show library folder</button>
+          <button id="reveal-results" class="link-button" type="button">Show results folder</button>
+        </footer>
+      </aside>
+
+      <section id="detail" class="detail"></section>
+    </main>
+
+    <footer class="statusline">
+      <span id="cost"></span>
+    </footer>
+
+    <script nonce="{{nonce}}" src="{{scriptUri}}"></script>
+  </body>
+</html>

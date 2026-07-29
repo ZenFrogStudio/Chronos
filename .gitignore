@@ -1,0 +1,7 @@
+node_modules/
+dist/
+dist-test/
+*.vsix
+.DS_Store
+.sandbox/*
+!.sandbox/README.md

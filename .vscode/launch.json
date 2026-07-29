@@ -1,0 +1,28 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "//": "The second arg opens the sandbox as the dev host's workspace folder. Opening a folder *inside* the running dev host instead reloads the window and drops --extensionDevelopmentPath, which silently unloads Chronus.",
+      "name": "Run Chronus",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}",
+        "${workspaceFolder}/.sandbox"
+      ],
+      "outFiles": ["${workspaceFolder}/dist/**/*.js"],
+      "preLaunchTask": "build"
+    },
+    {
+      "//": "Escape hatch: launches whatever is already in dist/. Use if the task layer misbehaves — run `npm run compile` yourself first.",
+      "name": "Run Chronus (no build)",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}",
+        "${workspaceFolder}/.sandbox"
+      ],
+      "outFiles": ["${workspaceFolder}/dist/**/*.js"]
+    }
+  ]
+}

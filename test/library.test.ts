@@ -1,0 +1,295 @@
+import assert from 'node:assert/strict';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import { afterEach, beforeEach, describe, it } from 'node:test';
+import {
+  createPlan,
+  duplicatePlan,
+  ensureLibrary,
+  isInside,
+  listPlans,
+  readPlan,
+  readPlanAt,
+  removePlan,
+  renamePlan,
+  seedLibrary,
+  toPlanFileName,
+  uniqueName,
+  writePlan,
+  writePlanAt
+} from '../src/library';
+
+let dir: string;
+
+beforeEach(() => {
+  dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chronus-lib-'));
+});
+
+afterEach(() => {
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+describe('toPlanFileName', () => {
+  it('should_slug_a_plain_title', () => {
+    assert.equal(toPlanFileName('Refactor Auth'), 'refactor-auth.md');
+  });
+
+  it('should_collapse_punctuation_and_trim_dashes', () => {
+    assert.equal(toPlanFileName('  Fix: the *thing*!  '), 'fix-the-thing.md');
+  });
+
+  it('should_not_double_the_extension', () => {
+    assert.equal(toPlanFileName('notes.md'), 'notes.md');
+  });
+
+  it('should_strip_path_separators_from_a_title', () => {
+    // A title is a label; no label needs to address the filesystem.
+    assert.equal(toPlanFileName('../../etc/passwd'), 'etc-passwd.md');
+    assert.equal(toPlanFileName('C:\\Windows\\System32'), 'c-windows-system32.md');
+  });
+
+  it('should_survive_a_title_with_nothing_usable_in_it', () => {
+    assert.equal(toPlanFileName('///'), 'plan-untitled.md');
+    assert.equal(toPlanFileName(''), 'plan-untitled.md');
+  });
+
+  it('should_escape_names_windows_reserves', () => {
+    assert.equal(toPlanFileName('CON'), 'plan-con.md');
+    assert.equal(toPlanFileName('lpt1'), 'plan-lpt1.md');
+  });
+
+  it('should_cap_an_absurdly_long_title', () => {
+    const name = toPlanFileName('a'.repeat(500));
+
+    assert.ok(name.length <= 63);
+  });
+});
+
+describe('uniqueName', () => {
+  it('should_leave_a_free_name_alone', () => {
+    assert.equal(uniqueName(['other.md'], 'plan.md'), 'plan.md');
+  });
+
+  it('should_append_a_counter_when_taken', () => {
+    assert.equal(uniqueName(['plan.md'], 'plan.md'), 'plan-2.md');
+    assert.equal(uniqueName(['plan.md', 'plan-2.md'], 'plan.md'), 'plan-3.md');
+  });
+
+  it('should_treat_names_case_insensitively', () => {
+    // Windows and macOS filesystems do; assuming otherwise overwrites files.
+    assert.equal(uniqueName(['Plan.md'], 'plan.md'), 'plan-2.md');
+  });
+});
+
+describe('isInside', () => {
+  it('should_accept_a_direct_child', () => {
+    assert.equal(isInside('/library', '/library/plan.md'), true);
+  });
+
+  it('should_reject_traversal_out_of_the_library', () => {
+    assert.equal(isInside('/library', '/library/../secrets.md'), false);
+    assert.equal(isInside('/library', '/elsewhere/plan.md'), false);
+  });
+
+  it('should_reject_the_library_directory_itself', () => {
+    assert.equal(isInside('/library', '/library'), false);
+  });
+
+  it('should_reject_a_sibling_with_a_shared_prefix', () => {
+    assert.equal(isInside('/library', '/library-other/plan.md'), false);
+  });
+});
+
+describe('library CRUD', () => {
+  it('should_create_a_plan_with_starter_content', () => {
+    const plan = createPlan(dir, 'Refactor Auth');
+
+    assert.equal(plan.name, 'refactor-auth.md');
+    assert.match(readPlan(dir, plan.name), /^# refactor-auth/);
+    assert.ok(fs.existsSync(plan.filePath));
+  });
+
+  it('should_deduplicate_a_repeated_title', () => {
+    createPlan(dir, 'Nightly');
+    const second = createPlan(dir, 'Nightly');
+
+    assert.equal(second.name, 'nightly-2.md');
+    assert.equal(listPlans(dir).length, 2);
+  });
+
+  it('should_round_trip_written_text', () => {
+    const plan = createPlan(dir, 'Notes');
+    writePlan(dir, plan.name, '# Edited\n');
+
+    assert.equal(readPlan(dir, plan.name), '# Edited\n');
+  });
+
+  it('should_list_only_markdown_newest_first', () => {
+    const old = createPlan(dir, 'Older');
+    fs.utimesSync(old.filePath, new Date(0), new Date(0));
+    createPlan(dir, 'Newer');
+    fs.writeFileSync(path.join(dir, 'notes.txt'), 'ignored');
+
+    const plans = listPlans(dir);
+
+    assert.deepEqual(plans.map((p) => p.name), ['newer.md', 'older.md']);
+  });
+
+  it('should_return_an_empty_list_for_a_missing_directory', () => {
+    assert.deepEqual(listPlans(path.join(dir, 'nope')), []);
+  });
+
+  it('should_rename_a_plan_and_keep_its_content', () => {
+    const plan = createPlan(dir, 'Before');
+    writePlan(dir, plan.name, 'body');
+
+    const renamed = renamePlan(dir, plan.name, 'After');
+
+    assert.equal(renamed.name, 'after.md');
+    assert.equal(readPlan(dir, 'after.md'), 'body');
+    assert.equal(fs.existsSync(plan.filePath), false);
+  });
+
+  it('should_be_a_no_op_when_renaming_to_the_same_title', () => {
+    const plan = createPlan(dir, 'Same');
+
+    const renamed = renamePlan(dir, plan.name, 'Same');
+
+    assert.equal(renamed.name, plan.name);
+    assert.equal(listPlans(dir).length, 1);
+  });
+
+  it('should_not_clobber_an_existing_plan_when_renaming_onto_it', () => {
+    createPlan(dir, 'Taken');
+    const other = createPlan(dir, 'Other');
+
+    const renamed = renamePlan(dir, other.name, 'Taken');
+
+    assert.equal(renamed.name, 'taken-2.md');
+    assert.equal(listPlans(dir).length, 2);
+  });
+
+  it('should_duplicate_a_plan_with_its_content', () => {
+    const plan = createPlan(dir, 'Source');
+    writePlan(dir, plan.name, 'original');
+
+    const copy = duplicatePlan(dir, plan.name);
+
+    assert.equal(copy.name, 'source-copy.md');
+    assert.equal(readPlan(dir, copy.name), 'original');
+  });
+
+  it('should_deduplicate_repeated_duplication', () => {
+    const plan = createPlan(dir, 'Source');
+    duplicatePlan(dir, plan.name);
+
+    assert.equal(duplicatePlan(dir, plan.name).name, 'source-copy-2.md');
+  });
+
+  it('should_remove_a_plan', () => {
+    const plan = createPlan(dir, 'Doomed');
+
+    removePlan(dir, plan.name);
+
+    assert.deepEqual(listPlans(dir), []);
+  });
+});
+
+describe('ensureLibrary and seeding', () => {
+  it('should_report_creation_only_the_first_time', () => {
+    const fresh = path.join(dir, 'library');
+
+    assert.equal(ensureLibrary(fresh), true);
+    assert.equal(ensureLibrary(fresh), false, 'a second call must not look like a first run');
+  });
+
+  it('should_seed_a_single_safe_starter_plan', () => {
+    seedLibrary(dir);
+    const plans = listPlans(dir);
+
+    assert.equal(plans.length, 1);
+    assert.match(readPlan(dir, plans[0].name), /Do not create, edit, move or delete any files/);
+  });
+});
+
+describe('external plans by absolute path', () => {
+  it('should_round_trip_a_plan_by_absolute_path', () => {
+    const filePath = path.join(dir, 'external.md');
+
+    writePlanAt(filePath, '# External\n');
+
+    assert.equal(readPlanAt(filePath), '# External\n');
+  });
+
+  it('should_operate_on_paths_outside_a_library_by_design', () => {
+    // An external plan the user explicitly scheduled lives outside the library.
+    // These helpers address it by its own absolute path; the name-derived guard
+    // does not — and must not — apply, because the runner already executes it.
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'chronus-ext-'));
+    const filePath = path.join(outside, 'elsewhere.md');
+
+    try {
+      writePlanAt(filePath, 'body');
+
+      assert.equal(readPlanAt(filePath), 'body');
+      assert.ok(!isInside(dir, filePath), 'the file is genuinely outside the library');
+    } finally {
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it('should_not_weaken_the_name_derived_guard', () => {
+    // Adding absolute-path helpers must not let a *name* escape the library:
+    // `writePlan` still routes through `resolveInLibrary`, which strips traversal.
+    const escaped = path.join(dir, '..', 'escaped.md');
+
+    try {
+      writePlan(dir, '../escaped.md', 'pwned');
+    } catch {
+      // Refusing or failing to resolve is fine; escaping the library is not.
+    }
+
+    assert.equal(fs.existsSync(escaped), false, 'the name-derived guard let a write escape');
+  });
+});
+
+describe('library — path traversal', () => {
+  const escapes = ['../outside.md', '..\\outside.md', 'sub/../../outside.md'];
+
+  it('should_refuse_to_read_outside_the_library', () => {
+    for (const bad of escapes) {
+      assert.throws(() => readPlan(dir, bad), /outside the plan library|ENOENT/);
+    }
+  });
+
+  it('should_refuse_to_write_outside_the_library', () => {
+    const outside = path.join(dir, '..', 'escaped.md');
+
+    for (const bad of escapes) {
+      try {
+        writePlan(dir, bad, 'pwned');
+      } catch {
+        // Either refusing or failing to resolve is acceptable; writing is not.
+      }
+    }
+
+    assert.equal(fs.existsSync(outside), false, 'a write escaped the library');
+  });
+
+  it('should_refuse_a_non_markdown_target', () => {
+    assert.throws(() => writePlan(dir, 'config.json', '{}'), /outside the plan library/);
+  });
+
+  it('should_refuse_to_delete_outside_the_library', () => {
+    const outside = path.join(dir, '..', `sibling-${Date.now()}.md`);
+    fs.writeFileSync(outside, 'keep me');
+
+    try {
+      assert.throws(() => removePlan(dir, `../${path.basename(outside)}`));
+      assert.equal(fs.existsSync(outside), true);
+    } finally {
+      fs.rmSync(outside, { force: true });
+    }
+  });
+});

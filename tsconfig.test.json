@@ -1,0 +1,27 @@
+{
+  "compilerOptions": {
+    "module": "Node16",
+    "moduleResolution": "Node16",
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "outDir": "dist-test",
+    "rootDir": ".",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true
+  },
+  "//": "Modules deliberately kept free of `vscode` so they run in plain Node.",
+  "include": [
+    "test/**/*.ts",
+    "src/decide.ts",
+    "src/launch.ts",
+    "src/library.ts",
+    "src/migrate.ts",
+    "src/outcome.ts",
+    "src/recurrence.ts",
+    "src/results.ts",
+    "src/time.ts",
+    "src/transcript.ts",
+    "src/types.ts"
+  ]
+}

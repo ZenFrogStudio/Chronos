@@ -1,0 +1,258 @@
+import { Outcome } from './outcome';
+
+/**
+ * Turning the CLI's NDJSON stream into something a person reads. Pure — no
+ * `vscode` import — so both renderings are directly testable.
+ *
+ * Two outputs come from one parse: ANSI for the live terminal, Markdown for the
+ * transcript on disk. They serve different moments — watching a run happen, and
+ * auditing one that ran while you were asleep — but the events are identical,
+ * so the JSON is parsed once and formatted twice.
+ *
+ * The Markdown side is the point of the whole module. A scheduled task runs
+ * unattended, often with permissions wide open; the transcript is the only
+ * record of what it actually did, so it deliberately includes tool calls and
+ * their targets rather than just the closing message.
+ */
+
+export type TranscriptEvent =
+  | { kind: 'session'; sessionId: string; model: string }
+  | { kind: 'text'; text: string }
+  | { kind: 'tool'; name: string; detail?: string }
+  | { kind: 'result'; turns: number; costUsd?: number; denials: number };
+
+export interface ParsedLine {
+  events: TranscriptEvent[];
+  /** True when this line was a `type: "result"` envelope. */
+  isResult: boolean;
+}
+
+export interface TranscriptContext {
+  fileName: string;
+  cwd: string;
+  permissionMode: string;
+  model?: string;
+  startedAt: Date;
+  attempt: number;
+}
+
+/** A tool input rendered into a transcript. Long enough to identify, short
+ *  enough that one pathological argument cannot dominate the file. */
+const DETAIL_MAX_CHARS = 200;
+
+/**
+ * The input field worth recording per tool. Reviewing an unattended run means
+ * asking "what did it touch?", and the answer is a path, a command or a
+ * pattern — not the whole argument object.
+ */
+const TOOL_DETAIL_KEYS = [
+  'command',
+  'file_path',
+  'path',
+  'pattern',
+  'url',
+  'description',
+  'query'
+];
+
+export function parseLine(line: string): ParsedLine {
+  const trimmed = line.trim();
+  if (!trimmed.startsWith('{')) {
+    return { events: [], isResult: false };
+  }
+
+  let event: any;
+  try {
+    event = JSON.parse(trimmed);
+  } catch {
+    // Progress lines can be truncated mid-stream; ignore and keep scanning.
+    return { events: [], isResult: false };
+  }
+
+  if (event.type === 'system' && event.subtype === 'init') {
+    return {
+      events: [{ kind: 'session', sessionId: String(event.session_id ?? ''), model: String(event.model ?? '') }],
+      isResult: false
+    };
+  }
+
+  if (event.type === 'assistant') {
+    const parts: any[] = event.message?.content ?? [];
+    const events: TranscriptEvent[] = [];
+    for (const part of parts) {
+      if (part.type === 'text' && part.text?.trim()) {
+        events.push({ kind: 'text', text: String(part.text).trim() });
+      } else if (part.type === 'tool_use') {
+        events.push({ kind: 'tool', name: String(part.name ?? 'tool'), detail: toolDetail(part.input) });
+      }
+    }
+    return { events, isResult: false };
+  }
+
+  if (event.type === 'result') {
+    return {
+      events: [
+        {
+          kind: 'result',
+          turns: Number(event.num_turns ?? 0),
+          costUsd: typeof event.total_cost_usd === 'number' ? event.total_cost_usd : undefined,
+          denials: event.permission_denials?.length ?? 0
+        }
+      ],
+      isResult: true
+    };
+  }
+
+  return { events: [], isResult: false };
+}
+
+function toolDetail(input: unknown): string | undefined {
+  if (!input || typeof input !== 'object') {
+    return undefined;
+  }
+  const record = input as Record<string, unknown>;
+  for (const key of TOOL_DETAIL_KEYS) {
+    const value = record[key];
+    if (typeof value === 'string' && value.trim()) {
+      return truncate(value.trim().replace(/\s+/g, ' '), DETAIL_MAX_CHARS);
+    }
+  }
+  return undefined;
+}
+
+// ---------- terminal ----------
+
+export function toAnsi(event: TranscriptEvent): string | undefined {
+  switch (event.kind) {
+    case 'session':
+      return `\x1b[2msession ${event.sessionId} · ${event.model}\x1b[0m`;
+    case 'text':
+      return event.text;
+    case 'tool':
+      return `\x1b[36m⚙ ${event.name}\x1b[0m${event.detail ? `\x1b[2m ${event.detail}\x1b[0m` : ''}`;
+    case 'result': {
+      const cost = event.costUsd !== undefined ? ` · $${event.costUsd.toFixed(4)}` : '';
+      const denials = event.denials
+        ? ` · \x1b[33m${event.denials} permission denial(s)\x1b[0m`
+        : '';
+      return `\x1b[2m${event.turns} turns${cost}\x1b[0m${denials}`;
+    }
+  }
+}
+
+// ---------- transcript ----------
+
+export function toMarkdown(event: TranscriptEvent): string | undefined {
+  switch (event.kind) {
+    case 'session':
+      // Recorded in the header instead; repeating it mid-document is noise.
+      return undefined;
+    case 'text':
+      return event.text;
+    case 'tool':
+      // Fenced rather than inline: a command containing backticks would
+      // otherwise break out and corrupt the rest of the document.
+      return event.detail
+        ? `**${event.name}**\n\n\`\`\`\n${event.detail}\n\`\`\``
+        : `**${event.name}**`;
+    case 'result':
+      // The footer states the outcome authoritatively once the process exits.
+      return undefined;
+  }
+}
+
+export function transcriptHeader(context: TranscriptContext): string {
+  const rows = [
+    ['Started', localStamp(context.startedAt)],
+    ['Directory', context.cwd],
+    ['Permissions', context.permissionMode],
+    ['Model', context.model || 'default']
+  ];
+  if (context.attempt > 1) {
+    rows.push(['Attempt', `retry ${context.attempt - 1}`]);
+  }
+
+  return [
+    `# ${context.fileName}`,
+    '',
+    '| | |',
+    '|---|---|',
+    ...rows.map(([label, value]) => `| ${label} | ${escapeCell(value)} |`),
+    '',
+    '---',
+    '',
+    ''
+  ].join('\n');
+}
+
+export function transcriptFooter(outcome: Outcome, durationMs: number): string {
+  const facts = [formatDuration(durationMs)];
+  if (outcome.numTurns !== undefined) {
+    facts.unshift(`${outcome.numTurns} turns`);
+  }
+  if (outcome.costUsd !== undefined) {
+    facts.push(`$${outcome.costUsd.toFixed(4)}`);
+  }
+
+  const lines = [
+    '',
+    '---',
+    '',
+    '## Outcome',
+    '',
+    outcome.ok ? `**Completed** — ${facts.join(' · ')}` : `**Failed** — ${outcome.error ?? 'unknown error'}`,
+    ''
+  ];
+
+  if (!outcome.ok) {
+    lines.push(`${facts.join(' · ')}`, '');
+  }
+
+  // A run can exit successfully having been blocked from most of its work, so
+  // this must be prominent rather than a footnote.
+  if (outcome.denials > 0) {
+    lines.push(
+      `> ⚠ ${outcome.denials} tool call(s) were blocked by permission gating.`,
+      '> Part of this plan did not run.',
+      ''
+    );
+  }
+
+  return lines.join('\n');
+}
+
+// ---------- helpers ----------
+
+/**
+ * Local time, formatted deterministically. A transcript is read by a person in
+ * their own timezone, so it is the one place local wall-clock beats UTC — and
+ * building it by hand rather than through `toLocaleString` keeps the output
+ * stable enough to assert on.
+ */
+export function localStamp(date: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return (
+    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ` +
+    `${pad(date.getHours())}:${pad(date.getMinutes())}`
+  );
+}
+
+export function formatDuration(ms: number): string {
+  const total = Math.max(0, Math.round(ms / 1000));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const seconds = total % 60;
+  if (hours > 0) {
+    return `${hours}h ${minutes}m`;
+  }
+  return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+}
+
+function truncate(text: string, max: number): string {
+  return text.length <= max ? text : `${text.slice(0, max)}…`;
+}
+
+/** A literal pipe would split a Markdown table cell in two. */
+function escapeCell(text: string): string {
+  return text.replace(/\|/g, '\\|');
+}

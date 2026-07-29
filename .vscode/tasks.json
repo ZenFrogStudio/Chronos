@@ -1,0 +1,38 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "//": "F5 uses this. One-shot shell command: no background matcher, no npm task provider, nothing that varies between VS Code and VSCodium.",
+      "label": "build",
+      "type": "shell",
+      "command": "npm run compile",
+      "problemMatcher": [],
+      "presentation": { "reveal": "silent", "panel": "shared" },
+      "group": { "kind": "build", "isDefault": true }
+    },
+    {
+      "//": "Optional: run manually for rebuild-on-save, then Ctrl+R in the host.",
+      "label": "watch",
+      "type": "shell",
+      "command": "npm run watch",
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "esbuild",
+        "fileLocation": ["relative", "${workspaceFolder}"],
+        "pattern": {
+          "regexp": "^(.+):(\\d+):(\\d+): (error|warning): (.+)$",
+          "file": 1,
+          "line": 2,
+          "column": 3,
+          "severity": 4,
+          "message": 5
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": "^\\[build\\] started",
+          "endsPattern": "^\\[build\\] finished"
+        }
+      }
+    }
+  ]
+}

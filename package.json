@@ -1,0 +1,150 @@
+{
+  "name": "chronus",
+  "displayName": "Chronus",
+  "description": "Schedule Claude Code tasks from Markdown plan files.",
+  "version": "0.8.0-rc.2",
+  "publisher": "onemedialabs",
+  "license": "MIT",
+  "icon": "media/icon.png",
+  "engines": {
+    "vscode": "^1.93.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "claude",
+    "scheduler",
+    "automation",
+    "markdown"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "chronus",
+          "title": "Chronus",
+          "icon": "media/chronus.svg"
+        }
+      ]
+    },
+    "views": {
+      "chronus": [
+        {
+          "id": "chronus.launcher",
+          "name": "Chronus"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "chronus.launcher",
+        "contents": "Schedule Claude Code tasks from Markdown plans.\n[Open Manager](command:chronus.openManager)\n[Schedule a Markdown file](command:chronus.addFiles)"
+      }
+    ],
+    "commands": [
+      {
+        "command": "chronus.openManager",
+        "title": "Chronus: Open Manager",
+        "icon": "$(multiple-windows)"
+      },
+      {
+        "command": "chronus.addFiles",
+        "title": "Chronus: Schedule Markdown File...",
+        "icon": "$(add)"
+      },
+      {
+        "command": "chronus.showLogs",
+        "title": "Chronus: Show Logs"
+      }
+    ],
+    "configuration": {
+      "title": "Chronus",
+      "properties": {
+        "chronus.claudePath": {
+          "type": "string",
+          "default": "claude",
+          "markdownDescription": "Path to the `claude` executable. Leave as `claude` to resolve from PATH."
+        },
+        "chronus.libraryPath": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Folder holding your plan library. Leave empty to use Chronus's own storage. Changing this does not move existing plans; already-scheduled tasks keep working either way, since they store absolute paths."
+        },
+        "chronus.resultsPath": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Folder for run transcripts — one subfolder per plan, one Markdown file per run. Leave empty to use a `results` folder beside your plan library. These are never deleted automatically, unlike raw logs."
+        },
+        "chronus.showTerminalOnRun": {
+          "type": "boolean",
+          "default": true,
+          "description": "Reveal the terminal panel when a task starts. Focus is left where it is. Turn off if scheduled runs interrupt you."
+        },
+        "chronus.maxConcurrent": {
+          "type": "number",
+          "default": 1,
+          "minimum": 1,
+          "maximum": 5,
+          "description": "Maximum number of tasks running at once. Raise deliberately: parallel agents editing one repository will collide."
+        },
+        "chronus.maxRetries": {
+          "type": "number",
+          "default": 3,
+          "minimum": 0,
+          "maximum": 10,
+          "description": "Retry attempts after a failed run before the task is given up on."
+        },
+        "chronus.retryDelayMinutes": {
+          "type": "number",
+          "default": 60,
+          "minimum": 1,
+          "description": "Delay before retrying a failed run."
+        },
+        "chronus.graceWindowMinutes": {
+          "type": "number",
+          "default": 15,
+          "minimum": 0,
+          "description": "How late a task may fire and still run. Beyond this it is marked missed and waits for your decision instead of running unattended."
+        },
+        "chronus.idleTimeoutMinutes": {
+          "type": "number",
+          "default": 15,
+          "minimum": 1,
+          "description": "Kill a run that produces no output for this long."
+        },
+        "chronus.maxRuntimeMinutes": {
+          "type": "number",
+          "default": 60,
+          "minimum": 1,
+          "description": "Hard wall-clock ceiling on a single run."
+        },
+        "chronus.logRetentionDays": {
+          "type": "number",
+          "default": 30,
+          "minimum": 1,
+          "description": "Delete run transcripts older than this on startup."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.js --production",
+    "compile": "node esbuild.js",
+    "watch": "node esbuild.js --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test dist-test/test/",
+    "pretest": "tsc -p tsconfig.test.json",
+    "package": "npm run typecheck && npm run build && vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/vscode": "^1.93.0",
+    "esbuild": "^0.28.1",
+    "typescript": "^5.5.0"
+  }
+}

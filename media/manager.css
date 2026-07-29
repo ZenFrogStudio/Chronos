@@ -1,0 +1,533 @@
+/* Chronus manager. Palette from VS Code theme vars so it adapts to any theme.
+   Global values only — no component tokens. */
+
+:root {
+  --border: var(--vscode-widget-border, color-mix(in srgb, var(--vscode-foreground) 18%, transparent));
+  --accent: var(--vscode-focusBorder);
+  --muted: var(--vscode-descriptionForeground);
+  --danger: var(--vscode-errorForeground);
+  --raised: color-mix(in srgb, var(--vscode-foreground) 4%, transparent);
+  --glass-bg: color-mix(in srgb, var(--vscode-sideBar-background) 78%, transparent);
+  --radius: 6px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  color: var(--vscode-foreground);
+  background: var(--vscode-editor-background);
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size);
+}
+
+.notice {
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  border-left: 2px solid var(--danger);
+  color: var(--muted);
+  font-size: 0.92em;
+}
+
+/* Sticky, unlike a notice: a broken claudePath stays broken until it is fixed. */
+.banner {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--danger);
+  border-left: 2px solid var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  color: var(--vscode-foreground);
+  font-size: 0.92em;
+}
+
+/* --- Whole-pane drop target --- */
+
+.drop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  border: 2px dashed var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--vscode-editor-background));
+  pointer-events: none;
+}
+
+body.dragging .drop-overlay {
+  display: flex;
+}
+
+.drop-overlay-title {
+  margin: 0;
+  padding: 12px 20px;
+  border-radius: var(--radius);
+  background: var(--vscode-editor-background);
+  border: 1px solid var(--border);
+  font-weight: 600;
+}
+
+.shell {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 260px 1fr;
+}
+
+/* --- Library pane --- */
+
+.library {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid var(--border);
+  background: var(--glass-bg);
+  backdrop-filter: blur(12px);
+}
+
+.library-head {
+  padding: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.library-title {
+  margin: 0 0 8px;
+  font-size: 0.78em;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.library-actions {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.search {
+  width: 100%;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  font: inherit;
+}
+
+.search:focus,
+.field-input:focus,
+.editor:focus {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.plan-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.plan-group {
+  margin: 6px 0 2px;
+  padding: 0 6px;
+  font-size: 0.72em;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.plan-item {
+  display: block;
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 200ms ease-in-out, border-color 200ms ease-in-out;
+}
+
+.plan-item:hover {
+  background: var(--vscode-list-hoverBackground);
+}
+
+.plan-item.is-selected {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  background: var(--vscode-list-activeSelectionBackground);
+  color: var(--vscode-list-activeSelectionForeground);
+}
+
+.plan-name {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plan-meta {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.8em;
+  color: var(--muted);
+}
+
+.plan-item.is-selected .plan-meta {
+  color: inherit;
+  opacity: 0.8;
+}
+
+.library-foot {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+}
+
+/* --- Detail pane --- */
+
+.detail {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px 20px;
+}
+
+.detail-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.detail-title {
+  margin: 0;
+  font-size: 1.15em;
+  font-weight: 600;
+}
+
+.detail-path {
+  margin: 0 0 16px;
+  font-size: 0.85em;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.section {
+  margin-bottom: 20px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.section-title {
+  margin: 0 0 10px;
+  font-size: 0.75em;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 10px 16px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.field-label {
+  font-size: 0.8em;
+  color: var(--muted);
+}
+
+.field-input,
+select.field-input {
+  width: 100%;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  font: inherit;
+}
+
+.field.is-spaced {
+  margin-top: 10px;
+}
+
+.field-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.path-value {
+  flex: 1;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* --- Editor --- */
+
+.editor {
+  width: 100%;
+  min-height: 260px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: var(--vscode-editor-font-size, 13px);
+  line-height: 1.5;
+  resize: vertical;
+  tab-size: 2;
+}
+
+.editor-status {
+  margin-top: 6px;
+  font-size: 0.8em;
+  color: var(--muted);
+}
+
+.editor-status.is-dirty {
+  color: var(--vscode-editorWarning-foreground, var(--danger));
+}
+
+.editor-status.is-conflict {
+  color: var(--danger);
+}
+
+/* --- Buttons --- */
+
+.button {
+  padding: 4px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+  font: inherit;
+  cursor: pointer;
+  transition: background 200ms ease-in-out;
+}
+
+.button:hover {
+  background: var(--vscode-button-hoverBackground);
+}
+
+.button.is-quiet {
+  background: var(--vscode-button-secondaryBackground, transparent);
+  color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
+  border-color: var(--border);
+}
+
+.button.is-danger:hover {
+  background: color-mix(in srgb, var(--danger) 22%, transparent);
+  color: var(--danger);
+}
+
+.button:focus-visible,
+.plan-item:focus-visible,
+.link-button:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.link-button {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--vscode-textLink-foreground);
+  font: inherit;
+  font-size: 0.85em;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+/* --- Runs --- */
+
+.run {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.9em;
+}
+
+.run:last-child {
+  border-bottom: none;
+}
+
+.run-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.run-when {
+  flex: 1;
+}
+
+.run-result {
+  margin: 4px 0 2px;
+  padding-left: 8px;
+  border-left: 2px solid var(--border);
+  color: var(--muted);
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.badge {
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 0.8em;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.badge.is-ok { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+.badge.is-bad { border-color: var(--danger); color: var(--danger); }
+.badge.is-repeat { color: var(--vscode-foreground); }
+
+.pulse {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.25; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pulse { animation: none; }
+}
+
+.days {
+  display: flex;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.day {
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.8em;
+  cursor: pointer;
+  transition: border-color 200ms ease-in-out, color 200ms ease-in-out;
+}
+
+.day:hover {
+  border-color: var(--accent);
+  color: var(--vscode-foreground);
+}
+
+.day:focus-visible,
+.search:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.day.is-on {
+  border-color: var(--accent);
+  background: var(--raised);
+  color: var(--vscode-foreground);
+}
+
+.empty {
+  margin-top: 40px;
+  text-align: center;
+  color: var(--muted);
+}
+
+.empty-first-run {
+  max-width: 480px;
+  margin: 48px auto;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.empty-title {
+  margin: 0 0 14px;
+  font-size: 1.1em;
+  font-weight: 600;
+  color: var(--vscode-foreground);
+}
+
+.empty-ways {
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+
+.empty-ways li {
+  margin-bottom: 6px;
+}
+
+.empty-ways code {
+  padding: 0 3px;
+  border-radius: 3px;
+  background: var(--raised);
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 0.9em;
+}
+
+.statusline {
+  padding: 4px 12px;
+  border-top: 1px solid var(--border);
+  background: var(--glass-bg);
+  backdrop-filter: blur(12px);
+  font-size: 0.82em;
+  color: var(--muted);
+  text-align: right;
+}
+
+/* Narrow tab: stack the panes rather than crushing them. */
+@media (max-width: 700px) {
+  .shell {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr;
+  }
+
+  .library {
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    max-height: 40vh;
+  }
+}
