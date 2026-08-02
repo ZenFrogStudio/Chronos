@@ -83,6 +83,19 @@ export function isPlanFile(name: string): boolean {
 }
 
 /**
+ * A `text/uri-list` payload: one URI per line, `#` lines are comments.
+ * Both the VS Code explorer and the OS shell hand drops over in this format,
+ * and RFC 2483 says the separator is CRLF — but VS Code sends bare LF, so both
+ * are accepted.
+ */
+export function parseUriList(text: string): string[] {
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line !== '' && !line.startsWith('#'));
+}
+
+/**
  * Whether two paths address the same file. Resolved first, so `..` segments and
  * mixed separators do not defeat the comparison.
  *

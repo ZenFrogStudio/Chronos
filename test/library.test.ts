@@ -10,6 +10,7 @@ import {
   isInside,
   isScheduledPlan,
   listPlans,
+  parseUriList,
   readPlan,
   readPlanAt,
   removePlan,
@@ -100,6 +101,34 @@ describe('isInside', () => {
 
   it('should_reject_a_sibling_with_a_shared_prefix', () => {
     assert.equal(isInside('/library', '/library-other/plan.md'), false);
+  });
+});
+
+describe('parseUriList', () => {
+  it('should_split_on_crlf', () => {
+    assert.deepEqual(parseUriList('file:///c:/plans/a.md\r\nfile:///c:/plans/b.md'), [
+      'file:///c:/plans/a.md',
+      'file:///c:/plans/b.md'
+    ]);
+  });
+
+  it('should_split_on_bare_lf', () => {
+    assert.deepEqual(parseUriList('file:///plans/a.md\nfile:///plans/b.md'), [
+      'file:///plans/a.md',
+      'file:///plans/b.md'
+    ]);
+  });
+
+  it('should_skip_comment_lines', () => {
+    assert.deepEqual(parseUriList('# a comment\nfile:///plans/a.md'), ['file:///plans/a.md']);
+  });
+
+  it('should_skip_blank_and_whitespace_only_lines', () => {
+    assert.deepEqual(parseUriList('\nfile:///plans/a.md\n   \n\n'), ['file:///plans/a.md']);
+  });
+
+  it('should_return_nothing_for_empty_input', () => {
+    assert.deepEqual(parseUriList(''), []);
   });
 });
 

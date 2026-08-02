@@ -2,7 +2,7 @@
   "name": "chronus",
   "displayName": "Chronus",
   "description": "Schedule Claude Code tasks from Markdown plan files.",
-  "version": "0.8.0-rc.4",
+  "version": "0.8.0-rc.7",
   "publisher": "onemedialabs",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -40,12 +40,6 @@
         }
       ]
     },
-    "viewsWelcome": [
-      {
-        "view": "chronus.launcher",
-        "contents": "Schedule Claude Code tasks from Markdown plans.\n[Open Manager](command:chronus.openManager)\n[Schedule a Markdown file](command:chronus.addFiles)"
-      }
-    ],
     "commands": [
       {
         "command": "chronus.openManager",
@@ -58,10 +52,36 @@
         "icon": "$(add)"
       },
       {
+        "command": "chronus.scheduleFile",
+        "title": "Schedule with Chronus"
+      },
+      {
         "command": "chronus.showLogs",
         "title": "Chronus: Show Logs"
       }
     ],
+    "menus": {
+      "explorer/context": [
+        {
+          "command": "chronus.scheduleFile",
+          "when": "resourceExtname == .md",
+          "group": "7_modification"
+        }
+      ],
+      "editor/title/context": [
+        {
+          "command": "chronus.scheduleFile",
+          "when": "resourceExtname == .md",
+          "group": "1_chronus"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "chronus.scheduleFile",
+          "when": "false"
+        }
+      ]
+    },
     "configuration": {
       "title": "Chronus",
       "properties": {

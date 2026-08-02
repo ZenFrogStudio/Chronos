@@ -11,14 +11,106 @@ A visual redesign of the manager, which has been the extension's only UI since
 the sidebar was removed. It was a flat stack of identically weighted sections, so
 nothing answered *when does this run next?* at a glance and the run history — the
 record of what the agent did overnight — sat below a 260px textarea, usually off
-screen. Nothing outside `media/` changed: no logic, no message types, no storage.
+screen. That redesign changed nothing outside `media/`: no logic, no message
+types, no storage.
 
 Also in this release: test coverage for three of the 0.8.0-rc.3 audit fixes that
 shipped without any, because they lived in modules that import `vscode` and
 cannot load in the plain Node test runner. Closing the gaps meant moving the
 logic out; one of the moves also narrowed a guard.
 
+### Added
+
+- **A Runs panel across the bottom of the manager, listing every run for every
+  plan.** Run history only ever lived inside the selected plan's detail pane, so
+  answering *what is Chronus doing, and did anything fail?* meant clicking each
+  plan in turn. The panel is pinned under whatever plan you have open and splits
+  into **Upcoming** — each active series' next occurrence, plus any retry the
+  scheduler has queued ahead of time — and **Recent**, everything that has
+  already happened, newest first. Countdowns and elapsed timers tick there as
+  they do in the detail pane. The per-plan Runs section is unchanged; the panel
+  is the overview, the section is the detail.
+
+  Row actions — cancel, skip, reschedule, result, raw log — work on runs
+  belonging to plans you are not looking at, which is the one thing the per-plan
+  section could not do. The plan name on each row is a button that selects it.
+  A filter narrows to **Upcoming**, **Completed** or **Needs attention** (failed,
+  missed, auth required, denials — cancelling is left out, since you did that
+  yourself). **Hide** collapses the panel to its header, and both the collapse
+  state and the filter survive a reload.
+
+  *Upcoming* deliberately means only occurrences that exist: a series' own
+  `nextRunAt` and a queued retry's `scheduledAt`. Expanding a recurrence rule
+  across the coming week would be a forecast, and this panel is a record.
+
+  The panel reuses the statusline's space, so the 7-day cost figure moves into
+  its header rather than costing another strip. No schema, scheduler or runner
+  changes: `TaskSeries` and `TaskRun` are untouched, and `Manager.post()` sends
+  one new derived field over the state message it already sent.
+
+- New `src/activity.ts` — `buildActivity(series, runs, now)`, pure and unit
+  tested, holding the ordering and the upcoming/recent split. The webview renders
+  what it is handed. `recency()` is now exported from `history.ts` and shared, so
+  "newest first" has one definition rather than two that can drift; it gained a
+  `startedAt` step for runs that have neither finished nor been missed, which
+  pruning never sees.
+
+- **Right-click any `.md` file → Schedule with Chronus.** In the explorer or on
+  an editor tab; multi-select works. This is now the shortest way in and the one
+  that does not depend on drag-and-drop working, which — see below — it largely
+  had stopped doing. Hidden from the command palette, since it needs a file to
+  act on and `Chronus: Schedule Markdown File…` already covers the palette case.
+
+- **The activity-bar view accepts dropped files.** It was an empty tree dressed
+  up with `viewsWelcome` links; it is now two real rows — *Open Manager* and
+  *Schedule a Markdown file…* — behind a `TreeDragAndDropController`. Welcome
+  content cannot be a drop target, which is why the rows had to become real ones.
+  Drops here work from both the VS Code explorer and Windows Explorer, need no
+  modifier key, and schedule the file **in place**. New `src/launcher.ts` holds
+  the view and its controller, out of `extension.ts`.
+
+- **A Completed section pinned to the foot of the plan library.** A one-shot
+  that has run keeps its place in the list forever, so the top of the sidebar
+  slowly fills with plans that will never fire again and the ones that still
+  have a future get pushed down. Finished one-shots now drop out of **Library**
+  and **External** and collect under **Completed**, newest first, with their
+  names dimmed. Their meta line says when they ran rather than *Ran once*, which
+  under that heading would only repeat it.
+
+  The section sits outside the scrolling list, anchored above the folder links,
+  so a growing pile of finished plans neither pushes the live ones out of view
+  nor scrolls away itself. It takes a third of the panel at most and scrolls
+  within that.
+
+  "Completed" is stricter than the stored `spent` flag, which the scheduler also
+  sets the moment a run starts and on a one-shot that was missed. A plan only
+  moves once its last run has actually finished — so a one-shot mid-run stays
+  put and reads *Running now*, and a missed one stays put and reads *Missed*,
+  since that one is still waiting for you to run or reschedule it.
+
 ### Fixed
+
+- **Dragging a file from Windows Explorer onto the manager works again.** It had
+  been failing with *"Could not read the dropped files — use Import instead."*
+  for some time, and the cause was outside Chronus: the code read the dropped
+  file's location from `File.path`, a non-standard property Electron added and
+  then removed in version 32. Every current VS Code build is well past that, so
+  the property was simply `undefined` and the list came back empty.
+
+  There is no replacement — a sandboxed webview cannot learn where a file lives
+  any more, by design. What it can still do is read the contents, so an OS drop
+  now copies the file into your plan library and schedules the copy, exactly as
+  **Import** does. The notice after the drop says so, because "scheduled" and
+  "copied, then scheduled" differ in a way you would otherwise discover later:
+  edits to the original would never run. Drops onto the activity-bar view and the
+  right-click command still schedule in place, and remain the better route.
+
+- **Dragging from the VS Code explorer onto the manager no longer silently does
+  nothing.** VS Code disables mouse interaction over a webview while a drag is in
+  flight, so the manager never saw the drag unless you held Shift
+  ([vscode#182449](https://github.com/microsoft/vscode/issues/182449)). Nobody
+  would guess that. The Shift path still works, but the activity-bar view added
+  above is a real drop target that needs no modifier.
 
 - **The external-plan guard no longer folds case on filesystems that don't.**
   The check deciding whether the manager may write to an absolute path compared

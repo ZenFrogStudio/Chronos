@@ -10,8 +10,17 @@ import { MAX_MISSED_RUNS, MAX_RECENT_RUNS, TaskRun, isFinished } from './types';
  * never answers is a missed run that nothing else will ever clear.
  */
 
-/** When a run last mattered. A missed run has no `finishedAt`, only a `missedAt`. */
-const recency = (run: TaskRun): string => run.finishedAt ?? run.missedAt ?? run.scheduledAt;
+/**
+ * When a run last mattered. A missed run has no `finishedAt`, only a `missedAt`;
+ * a run still going has neither, so it falls back to when it started.
+ *
+ * Exported because `buildActivity` orders the Runs panel by the same rule, and
+ * two definitions of "newest first" would drift apart. Pruning is unaffected by
+ * the `startedAt` step: it only ever weighs finished and missed runs, and both
+ * of those always carry one of the two earlier fields.
+ */
+export const recency = (run: TaskRun): string =>
+  run.finishedAt ?? run.missedAt ?? run.startedAt ?? run.scheduledAt;
 
 /**
  * Caps history, newest first.

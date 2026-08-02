@@ -29,6 +29,10 @@
           <input id="search" class="search" type="search" placeholder="Search plans" aria-label="Search plans" />
         </header>
         <div id="plan-list" class="plan-list"></div>
+        <div id="completed" class="completed" hidden>
+          <p class="plan-group">Completed</p>
+          <div id="completed-list" class="completed-list"></div>
+        </div>
         <footer class="library-foot">
           <button id="reveal-library" class="link-button" type="button">Show library folder</button>
           <button id="reveal-results" class="link-button" type="button">Show results folder</button>
@@ -38,9 +42,20 @@
       <section id="detail" class="detail"></section>
     </main>
 
-    <footer class="statusline">
-      <span id="cost"></span>
-    </footer>
+    <section id="activity" class="activity">
+      <header class="activity-head">
+        <h2 class="activity-title">Runs</h2>
+        <select id="activity-filter" class="activity-filter" data-focus-key="activity-filter" aria-label="Filter runs">
+          <option value="all">All</option>
+          <option value="upcoming">Upcoming</option>
+          <option value="completed">Completed</option>
+          <option value="attention">Needs attention</option>
+        </select>
+        <span id="cost" class="activity-cost"></span>
+        <button id="activity-toggle" class="link-button" type="button" aria-expanded="true" aria-controls="activity-list">Hide</button>
+      </header>
+      <div id="activity-list" class="activity-list"></div>
+    </section>
 
     <script nonce="{{nonce}}" src="{{scriptUri}}"></script>
   </body>

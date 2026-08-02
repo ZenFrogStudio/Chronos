@@ -2,6 +2,7 @@ import { randomBytes } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
+import { buildActivity } from './activity';
 import { seriesEdit } from './edit';
 import * as library from './library';
 import { log } from './log';
@@ -14,6 +15,7 @@ import { TaskSeries } from './types';
 type Inbound =
   | { type: 'ready' }
   | { type: 'drop'; items: string[] }
+  | { type: 'dropText'; files: { name: string; text: string }[] }
   | { type: 'createPlan' }
   | { type: 'renamePlan'; name: string }
   | { type: 'duplicatePlan'; name: string }
@@ -233,6 +235,34 @@ export class Manager implements vscode.Disposable {
       case 'drop':
         await this.addPaths(message.items.map(toFsPath));
         return;
+
+      // A drop from the OS shell, which carries contents but no path — see the
+      // drop handler in manager.js. The file is copied into the library and the
+      // copy is what gets scheduled, so the notice says so rather than letting
+      // the user assume their original is now on a schedule.
+      case 'dropText': {
+        const scheduled: string[] = [];
+        // The webview already caps this, but it is the untrusted side of the
+        // boundary — so the size and shape are checked again here, where it
+        // counts. `createPlan` sanitises the name itself.
+        const dropped = (Array.isArray(message.files) ? message.files : []).filter(
+          (f) => f && typeof f.name === 'string' && typeof f.text === 'string' && f.text.length <= 1_000_000
+        );
+        for (const file of dropped) {
+          const plan = library.createPlan(dir, path.basename(file.name, '.md'), file.text);
+          await this.store.addSeries(createSeries(plan.filePath));
+          log.info(`copied a dropped file into the library and scheduled ${plan.name}`);
+          scheduled.push(plan.title);
+        }
+        this.post();
+        if (scheduled.length) {
+          this.notify(
+            `Copied ${scheduled.join(', ')} into your library and scheduled the copy — ` +
+              'a dropped file does not carry its location, so the original is untouched.'
+          );
+        }
+        return;
+      }
 
       // Electron does not implement window.prompt(), so naming happens here.
       case 'createPlan': {
@@ -517,6 +547,7 @@ export class Manager implements vscode.Disposable {
       external: dedupeByPath(external),
       series: this.store.getSeries(),
       runs: this.store.getRuns(),
+      activity: buildActivity(this.store.getSeries(), this.store.getRuns(), Date.now()),
       costLast7Days: this.store.costLast7Days(),
       setupProblem: this.setupProblem,
       schedulerElsewhere: !this.scheduler.leading
@@ -542,7 +573,7 @@ export class Manager implements vscode.Disposable {
  * Drops arrive as file:// URIs from the VS Code explorer and as plain paths
  * from the OS shell. Parsing the URI form handles percent-encoding correctly.
  */
-function toFsPath(item: string): string {
+export function toFsPath(item: string): string {
   return item.startsWith('file:') ? vscode.Uri.parse(item).fsPath : item;
 }
 

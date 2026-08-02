@@ -2,21 +2,31 @@
 
 Schedule Claude Code tasks from Markdown plan files, inside VS Code.
 
-Drop a `.md` file onto the Chronus manager, pick a time, and Chronus runs
-`claude` against it — once, daily, or on chosen weekdays — saving a transcript
-of every run.
+Right-click a `.md` file and choose **Schedule with Chronus**, pick a time, and
+Chronus runs `claude` against it — once, daily, or on chosen weekdays — saving a
+transcript of every run.
 
 ## The manager
 
 Chronus is a single editor tab: your plan library on the left, detail on the
 right — schedule, working directory, permissions, the plan text itself, and run
-history. Open it from the status bar item, the **Open Manager** button behind the
+history. Open it from the status bar item, the **Open Manager** row behind the
 clock icon in the activity bar, or `Chronus: Open Manager`.
 
-Add a plan two ways: **New plan** creates one in your library, or drop a `.md`
-file anywhere onto the manager — or use **Import** — to schedule one you already
-have. A dropped file is scheduled where it lies and listed under **External**;
-**Import** copies it into the library instead.
+Add a plan four ways:
+
+- **New plan** creates one in your library.
+- **Right-click any `.md` file** — in the VS Code explorer or on an editor tab —
+  and choose **Schedule with Chronus**. Multi-select works.
+- **Drag `.md` files onto the Chronus view** in the activity bar, from either the
+  VS Code explorer or Windows Explorer.
+- **Import** copies a file into your library and schedules the copy.
+
+The first three schedule the file where it lies, listed under **External**;
+**Import** copies it in. Dropping onto the manager tab itself also works, but
+copies rather than schedules in place: a file dropped from Windows Explorer no
+longer tells the editor where it came from, so there is no path to schedule. The
+notice after the drop says which happened.
 
 ## The plan library
 

@@ -3,11 +3,17 @@
   const vscode = acquireVsCodeApi();
 
   const listEl = /** @type {HTMLElement} */ (document.getElementById('plan-list'));
+  const completedEl = /** @type {HTMLElement} */ (document.getElementById('completed'));
+  const completedListEl = /** @type {HTMLElement} */ (document.getElementById('completed-list'));
   const detailEl = /** @type {HTMLElement} */ (document.getElementById('detail'));
   const noticeEl = /** @type {HTMLElement} */ (document.getElementById('notice'));
   const setupEl = /** @type {HTMLElement} */ (document.getElementById('setup'));
   const searchEl = /** @type {HTMLInputElement} */ (document.getElementById('search'));
   const costEl = /** @type {HTMLElement} */ (document.getElementById('cost'));
+  const activityEl = /** @type {HTMLElement} */ (document.getElementById('activity'));
+  const activityListEl = /** @type {HTMLElement} */ (document.getElementById('activity-list'));
+  const activityFilterEl = /** @type {HTMLSelectElement} */ (document.getElementById('activity-filter'));
+  const activityToggleEl = /** @type {HTMLElement} */ (document.getElementById('activity-toggle'));
 
   const DAY_LABELS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
   const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -27,12 +33,23 @@
   ];
   const SAVE_DEBOUNCE_MS = 2000;
 
-  /** @type {{plans: any[], external: any[], series: any[], runs: any[], costLast7Days: number, libraryPath: string, setupProblem?: string, schedulerElsewhere?: boolean}} */
-  let state = { plans: [], external: [], series: [], runs: [], costLast7Days: 0, libraryPath: '' };
+  /** @type {{plans: any[], external: any[], series: any[], runs: any[], activity: {upcoming: any[], recent: any[]}, costLast7Days: number, libraryPath: string, setupProblem?: string, schedulerElsewhere?: boolean}} */
+  let state = {
+    plans: [],
+    external: [],
+    series: [],
+    runs: [],
+    activity: { upcoming: [], recent: [] },
+    costLast7Days: 0,
+    libraryPath: ''
+  };
 
   /** Selection and editor buffer live here, never in the DOM — a re-render
    *  must never be able to lose what you typed. */
   let selected = /** @type {string|null} */ (null);
+  /** Runs-panel state, held here for the same reason. */
+  let activityFilter = 'all';
+  let activityCollapsed = false;
   let editor = {
     name: /** @type {string|null} */ (null),
     text: '',
@@ -47,6 +64,10 @@
 
   const previous = vscode.getState();
   if (previous && previous.selected) selected = previous.selected;
+  if (previous && previous.activityFilter) activityFilter = previous.activityFilter;
+  if (previous && previous.activityCollapsed) activityCollapsed = true;
+  activityFilterEl.value = activityFilter;
+  paintActivityCollapse();
 
   // ---------- helpers ----------
 
@@ -102,6 +123,13 @@
   const planByName = (name) => allPlans().find((p) => p.name === name);
   const seriesForPlan = (plan) =>
     plan ? state.series.find((s) => samePath(s.filePath, plan.filePath)) : undefined;
+  const seriesById = (id) => state.series.find((s) => s.id === id);
+
+  /** The plan a panel row should select. Absent once the series is unscheduled. */
+  function planForSeries(id) {
+    const series = seriesById(id);
+    return series ? allPlans().find((p) => samePath(p.filePath, series.filePath)) : undefined;
+  }
 
   const repeatOf = (s) =>
     !s.recurrence ? 'once' : s.recurrence.daysOfWeek.length === 7 ? 'daily' : 'weekly';
@@ -219,6 +247,7 @@
     withFocusPreserved(() => {
       renderList();
       renderDetail();
+      renderActivity();
     });
 
     costEl.textContent =
@@ -239,20 +268,63 @@
     }
 
     startTicker();
-    vscode.setState({ selected });
+    vscode.setState({ selected, activityFilter, activityCollapsed });
+  }
+
+  /** Mirrors `recency` in src/history.ts, which orders runs by the same rule. */
+  const recencyOf = (run) => run.finishedAt ?? run.missedAt ?? run.startedAt ?? run.scheduledAt;
+
+  const isFinished = (run) =>
+    run.status === 'completed' || run.status === 'failed' || run.status === 'cancelled';
+
+  /** The newest run of a series, whatever became of it. */
+  function lastRun(series) {
+    return state.runs
+      .filter((r) => r.seriesId === series.id)
+      .sort((a, b) => recencyOf(b).localeCompare(recencyOf(a)))[0];
+  }
+
+  /**
+   * A one-shot that has fired and finished with it. `spent` on its own is not
+   * enough — the scheduler also sets it the moment a run starts, and on a
+   * one-shot that was missed. Neither is done: one is still going, and the
+   * other is still waiting for you to run or reschedule it.
+   */
+  function isDone(plan) {
+    const series = seriesForPlan(plan);
+    if (!series || !series.spent) return false;
+    const run = lastRun(series);
+    return !!run && isFinished(run);
   }
 
   function renderList() {
     const term = searchEl.value.trim().toLowerCase();
     const match = (p) => !term || p.title.toLowerCase().includes(term);
+    const live = (p) => match(p) && !isDone(p);
 
-    const library = state.plans.filter(match);
-    const external = state.external.filter(match);
+    const library = state.plans.filter(live);
+    const external = state.external.filter(live);
+
+    // Done plans leave their source group, newest first. They render into their
+    // own pinned region at the foot of the panel rather than into the scrolling
+    // list, so a growing pile of them never pushes the live plans out of view.
+    const done = allPlans()
+      .filter((p) => match(p) && isDone(p))
+      .sort((a, b) =>
+        recencyOf(lastRun(seriesForPlan(b))).localeCompare(recencyOf(lastRun(seriesForPlan(a))))
+      );
+
+    completedEl.hidden = !done.length;
+    completedListEl.innerHTML = done.map(planItem).join('');
 
     if (!library.length && !external.length) {
-      listEl.innerHTML = `<p class="empty">${
-        term ? 'No plans match.' : 'No plans yet.<br />Create one to get started.'
-      }</p>`;
+      // With nothing live but something completed, the pinned region below is
+      // already the answer — an empty-state above it would contradict it.
+      listEl.innerHTML = done.length
+        ? ''
+        : `<p class="empty">${
+            term ? 'No plans match.' : 'No plans yet.<br />Create one to get started.'
+          }</p>`;
       return;
     }
 
@@ -266,22 +338,34 @@
     listEl.innerHTML = html;
   }
 
+  /** The line under a plan's name: where that plan is in its life. */
+  function planMeta(plan, series) {
+    if (!series) {
+      return plan.modifiedMs ? `Edited ${formatAge(plan.modifiedMs)}` : 'Not scheduled';
+    }
+    if (!series.spent) {
+      return series.enabled ? formatWhen(series.nextRunAt) : 'Paused';
+    }
+
+    // Spent, so there is no next occurrence to name — say how it ended instead.
+    const run = lastRun(series);
+    if (!run) return 'Ran once';
+    if (run.status === 'pending') return 'Queued';
+    if (run.status === 'running') return 'Running now';
+    if (run.status === 'missed') return 'Missed';
+    // Under the Completed heading "Ran once" would only repeat it, so say when.
+    return formatWhen(recencyOf(run));
+  }
+
   function planItem(plan) {
     const series = seriesForPlan(plan);
-    const meta = series
-      ? series.spent
-        ? 'Ran once'
-        : series.enabled
-          ? formatWhen(series.nextRunAt)
-          : 'Paused'
-      : plan.modifiedMs
-        ? `Edited ${formatAge(plan.modifiedMs)}`
-        : 'Not scheduled';
+    const meta = planMeta(plan, series);
 
     const classes = [
       'plan-item',
       plan.name === selected ? 'is-selected' : '',
-      isRunning(series) ? 'is-running' : ''
+      isRunning(series) ? 'is-running' : '',
+      isDone(plan) ? 'is-done' : ''
     ].join(' ');
 
     return `<button class="${classes}" type="button"
@@ -456,17 +540,23 @@
     </div>`;
   }
 
+  /**
+   * A run you would want to be told about. Cancelling is not on the list: you
+   * did that yourself, so it is history rather than something to chase.
+   */
+  const needsAttention = (run) =>
+    run.status === 'failed' || run.status === 'missed' || !!run.authFailure || !!run.denials;
+
   /** The spine dot carries the same verdict as the badges, so the rail scans. */
   function dotClass(run) {
     if (run.status === 'running') return 'is-running';
     if (run.status === 'pending') return 'is-queued';
-    if (run.status === 'failed' || run.status === 'missed' || run.authFailure || run.denials) {
-      return 'is-bad';
-    }
+    if (needsAttention(run)) return 'is-bad';
     return run.status === 'completed' ? 'is-ok' : '';
   }
 
-  function runRow(run, series) {
+  /** Shared by the per-plan section and the Runs panel, so the two cannot drift. */
+  function runBadges(run) {
     const badges = [];
     if (run.status === 'completed') badges.push('<span class="badge is-ok">completed</span>');
     if (run.status === 'failed') badges.push('<span class="badge is-bad">failed</span>');
@@ -477,12 +567,10 @@
     if (run.attempt > 1) badges.push(`<span class="badge">retry ${run.attempt - 1}</span>`);
     if (run.denials) badges.push(`<span class="badge is-bad">⚠ ${run.denials} denied</span>`);
     if (run.costUsd) badges.push(`<span class="badge">$${run.costUsd.toFixed(2)}</span>`);
+    return badges;
+  }
 
-    const when =
-      run.status === 'running' && run.startedAt
-        ? `running <span data-started="${run.startedAt}">0m 00s</span>`
-        : formatWhen(run.scheduledAt);
-
+  function runActions(run, series) {
     const actions = [];
     if (run.status === 'running') {
       actions.push(`<button class="link-button" type="button" data-action="cancel-run" data-run="${run.id}">cancel</button>`);
@@ -504,28 +592,124 @@
     if (run.logPath) {
       actions.push(`<button class="link-button" type="button" data-action="open-log" data-run="${run.id}">raw log</button>`);
     }
+    return actions;
+  }
 
-    const missedNote =
-      run.status === 'missed'
-        ? `<p class="run-result">Missed${run.missedCount > 1 ? ` ${run.missedCount} occurrences` : ''}${
-            run.missedReason === 'sleep' ? ' — machine asleep' : ' — VS Code closed'
-          }</p>`
-        : '';
+  /** A missed run has no result to show. This is what it says instead. */
+  function missedNote(run) {
+    if (run.status !== 'missed') return '';
+    return `Missed${run.missedCount > 1 ? ` ${run.missedCount} occurrences` : ''}${
+      run.missedReason === 'sleep' ? ' — machine asleep' : ' — VS Code closed'
+    }`;
+  }
+
+  const whenText = (run) =>
+    run.status === 'running' && run.startedAt
+      ? `running <span data-started="${run.startedAt}">0m 00s</span>`
+      : esc(formatWhen(run.scheduledAt));
+
+  function runRow(run, series) {
+    const note = missedNote(run);
 
     // The manager is where you sit down and read, so the summary is shown in
-    // full rather than clamped the way the sidebar clamps it.
+    // full rather than clamped the way the panel clamps it.
     const result = run.result ? `<p class="run-result">${esc(run.result)}</p>` : '';
 
     return `<div class="run">
       <span class="run-dot ${dotClass(run)}"></span>
       <div class="run-line">
-        <span class="run-when">${when}</span>
-        ${badges.join('')}
-        ${actions.join('')}
+        <span class="run-when">${whenText(run)}</span>
+        ${runBadges(run).join('')}
+        ${runActions(run, series).join('')}
       </div>
-      ${missedNote}
+      ${note ? `<p class="run-result">${esc(note)}</p>` : ''}
       ${result}
     </div>`;
+  }
+
+  // ---------- the Runs panel: every plan, upcoming and recent ----------
+
+  /**
+   * The overview the per-plan Runs section cannot give: what is coming up and
+   * what has already happened, across the whole library. Entries carry ids only
+   * — the run itself is looked up in the `runs` array already on hand.
+   */
+  function renderActivity() {
+    const activity = state.activity || { upcoming: [], recent: [] };
+    const runById = new Map(state.runs.map((r) => [r.id, r]));
+
+    const upcoming = activityFilter === 'all' || activityFilter === 'upcoming' ? activity.upcoming : [];
+    const recent = (activityFilter === 'all' || activityFilter === 'completed' || activityFilter === 'attention'
+      ? activity.recent
+      : []
+    ).filter((entry) => {
+      const run = runById.get(entry.runId);
+      if (!run) return false;
+      if (activityFilter === 'completed') return run.status === 'completed';
+      if (activityFilter === 'attention') return needsAttention(run);
+      return true;
+    });
+
+    if (!upcoming.length && !recent.length) {
+      activityListEl.innerHTML = `<p class="activity-empty">${
+        activityFilter === 'all' ? 'Nothing scheduled or run yet.' : 'Nothing matches this filter.'
+      }</p>`;
+      return;
+    }
+
+    let html = '';
+    if (upcoming.length) {
+      html += `<p class="activity-group">Upcoming</p>${upcoming
+        .map((entry) => activityRow(entry, runById.get(entry.runId)))
+        .join('')}`;
+    }
+    if (recent.length) {
+      html += `<p class="activity-group">Recent</p>${recent
+        .map((entry) => activityRow(entry, runById.get(entry.runId)))
+        .join('')}`;
+    }
+    activityListEl.innerHTML = html;
+  }
+
+  function activityRow(entry, run) {
+    const plan = planForSeries(entry.seriesId);
+    const title = plan
+      ? `<button class="activity-plan" type="button" data-action="select" data-name="${esc(plan.name)}">${esc(entry.planTitle)}</button>`
+      : `<span class="activity-plan is-gone">${esc(entry.planTitle)}</span>`;
+
+    // No run record yet — a series' next occurrence. Nothing to cancel or skip,
+    // so the row is a hollow dot and a countdown, and offers no actions.
+    if (!run) {
+      return `<div class="activity-row" data-series="${esc(entry.seriesId)}">
+        <span class="run-dot"></span>
+        ${title}
+        <span class="activity-when">${esc(formatWhen(entry.at))}</span>
+        <span class="activity-when is-count" data-countdown="${esc(entry.at)}">${esc(countdownText(entry.at))}</span>
+      </div>`;
+    }
+
+    const series = seriesById(entry.seriesId);
+    const note = run.result || missedNote(run);
+    const countdown =
+      run.status === 'pending' && Date.parse(run.scheduledAt) > Date.now()
+        ? `<span class="activity-when is-count" data-countdown="${esc(run.scheduledAt)}">${esc(countdownText(run.scheduledAt))}</span>`
+        : '';
+
+    return `<div class="activity-row" data-series="${esc(entry.seriesId)}">
+      <span class="run-dot ${dotClass(run)}"></span>
+      ${title}
+      <span class="activity-when">${whenText(run)}</span>
+      ${countdown}
+      ${runBadges(run).join('')}
+      ${note ? `<span class="activity-note">${esc(note)}</span>` : ''}
+      <span class="activity-actions">${runActions(run, series).join('')}</span>
+    </div>`;
+  }
+
+  function paintActivityCollapse() {
+    activityEl.classList.toggle('is-collapsed', activityCollapsed);
+    activityToggleEl.setAttribute('aria-expanded', String(!activityCollapsed));
+    activityToggleEl.textContent = activityCollapsed ? 'Show' : 'Hide';
   }
 
   // ---------- editor ----------
@@ -584,21 +768,23 @@
   }
 
   /** Drives everything on screen that moves with the clock: the elapsed timer of
-   *  a live run, the head countdown, and the ring's arc. */
+   *  a live run, the head countdown, the ring's arc, and the Runs panel. Scoped
+   *  to the document rather than the detail pane, because the panel is outside
+   *  it and its countdowns must tick too. */
   function startTicker() {
     clearInterval(elapsedTimer);
-    if (!detailEl.querySelector('[data-started], [data-countdown], [data-ring-next]')) return;
+    if (!document.querySelector('[data-started], [data-countdown], [data-ring-next]')) return;
 
     const tick = () => {
-      detailEl.querySelectorAll('[data-started]').forEach((el) => {
+      document.querySelectorAll('[data-started]').forEach((el) => {
         el.textContent = formatDuration(Date.now() - new Date(el.dataset.started).getTime());
       });
-      detailEl.querySelectorAll('[data-countdown]').forEach((el) => {
+      document.querySelectorAll('[data-countdown]').forEach((el) => {
         el.textContent = countdownText(el.dataset.countdown);
       });
       // CSP forbids inline styles, so the ring moves via its SVG presentation
       // attribute rather than el.style.
-      detailEl.querySelectorAll('[data-ring-next]').forEach((el) => {
+      document.querySelectorAll('[data-ring-next]').forEach((el) => {
         el.setAttribute(
           'stroke-dashoffset',
           ringOffset(el.dataset.ringNext, Number(el.dataset.ringInterval))
@@ -612,15 +798,100 @@
 
   // ---------- events ----------
 
-  listEl.addEventListener('click', (e) => {
+  /** Shared, because the completed plans sit outside the scrolling list. */
+  function selectPlan(e) {
     const el = /** @type {HTMLElement} */ (e.target).closest('[data-action="select"]');
     if (!el) return;
     saveNow();
     selected = /** @type {HTMLElement} */ (el).dataset.name ?? null;
     render();
-  });
+  }
+
+  listEl.addEventListener('click', selectPlan);
+  completedListEl.addEventListener('click', selectPlan);
 
   searchEl.addEventListener('input', renderList);
+
+  /**
+   * Everything a run row offers, keyed by run id and the series that owns it —
+   * never by the current selection. That is what lets the Runs panel act on a
+   * run belonging to a plan you are not looking at. Returns whether it handled
+   * the action, so each caller can go on to its own.
+   */
+  function runAction(action, runId, series) {
+    if (action === 'open-log') {
+      send({ type: 'openLog', id: runId });
+      return true;
+    }
+    if (action === 'open-result') {
+      send({ type: 'openResult', id: runId });
+      return true;
+    }
+    if (action === 'cancel-run') {
+      send({ type: 'cancelRun', id: runId });
+      return true;
+    }
+    if (action === 'dismiss-run') {
+      send({ type: 'dismissRun', id: runId });
+      return true;
+    }
+
+    if (!series) return false;
+
+    // Passing dismissRunId is harmless when absent — the Run now in the schedule
+    // section carries no run, a missed run's Run now clears itself as it fires.
+    if (action === 'run-now') {
+      send({ type: 'runNow', seriesId: series.id, dismissRunId: runId });
+      return true;
+    }
+
+    if (action === 'reschedule') {
+      const run = state.runs.find((r) => r.id === runId);
+      send({ type: 'dismissRun', id: runId });
+      // Prefill the missed run's own time of day on its next occurrence, and
+      // clear `spent` so the one-shot is genuinely back on the schedule.
+      patch(series.id, {
+        nextRunAt: nextAtTimeOf(run ? run.scheduledAt : series.nextRunAt),
+        enabled: true,
+        spent: false
+      });
+      return true;
+    }
+
+    return false;
+  }
+
+  activityListEl.addEventListener('click', (e) => {
+    const el = /** @type {HTMLElement} */ (e.target).closest('[data-action]');
+    if (!el) return;
+    const action = /** @type {HTMLElement} */ (el).dataset.action;
+
+    if (action === 'select') {
+      saveNow();
+      selected = /** @type {HTMLElement} */ (el).dataset.name ?? null;
+      render();
+      return;
+    }
+
+    // The row carries the series, so a run acts on its own plan rather than on
+    // whichever one happens to be open.
+    const row = /** @type {HTMLElement} */ (el).closest('[data-series]');
+    const series = row ? seriesById(/** @type {HTMLElement} */ (row).dataset.series) : undefined;
+    runAction(action, /** @type {HTMLElement} */ (el).dataset.run, series);
+  });
+
+  activityFilterEl.addEventListener('change', () => {
+    activityFilter = activityFilterEl.value;
+    renderActivity();
+    startTicker();
+    vscode.setState({ selected, activityFilter, activityCollapsed });
+  });
+
+  activityToggleEl.addEventListener('click', () => {
+    activityCollapsed = !activityCollapsed;
+    paintActivityCollapse();
+    vscode.setState({ selected, activityFilter, activityCollapsed });
+  });
 
   detailEl.addEventListener('click', (e) => {
     const el = /** @type {HTMLElement} */ (e.target).closest('[data-action]');
@@ -636,33 +907,14 @@
     if (action === 'schedule') return send({ type: 'schedulePlan', filePath: plan.filePath });
     if (action === 'duplicate') return send({ type: 'duplicatePlan', name: plan.name });
     if (action === 'delete') return send({ type: 'deletePlan', name: plan.name });
-    if (action === 'open-log') return send({ type: 'openLog', id: runId });
-    if (action === 'open-result') return send({ type: 'openResult', id: runId });
-    if (action === 'cancel-run') return send({ type: 'cancelRun', id: runId });
-    if (action === 'dismiss-run') return send({ type: 'dismissRun', id: runId });
 
     if (action === 'rename') {
       saveNow();
       return send({ type: 'renamePlan', name: plan.name });
     }
 
+    if (runAction(action, runId, series)) return;
     if (!series) return;
-
-    // Passing dismissRunId is harmless when absent — the Run now in the schedule
-    // section carries no run, a missed run's Run now clears itself as it fires.
-    if (action === 'run-now') return send({ type: 'runNow', seriesId: series.id, dismissRunId: runId });
-
-    if (action === 'reschedule') {
-      const run = state.runs.find((r) => r.id === runId);
-      send({ type: 'dismissRun', id: runId });
-      // Prefill the missed run's own time of day on its next occurrence, and
-      // clear `spent` so the one-shot is genuinely back on the schedule.
-      return patch(series.id, {
-        nextRunAt: nextAtTimeOf(run ? run.scheduledAt : series.nextRunAt),
-        enabled: true,
-        spent: false
-      });
-    }
 
     if (action === 'unschedule') return send({ type: 'removeSeries', id: series.id });
     if (action === 'browse-cwd') return send({ type: 'browseCwd', id: series.id });
@@ -774,11 +1026,10 @@
         .map((s) => s.trim())
         .filter((s) => s && !s.startsWith('#'));
     }
-    // OS-level drop. File.path is unreliable in a sandboxed webview, hence the
-    // Import/browse fallback.
-    return Array.from(dt.files || [])
-      .map((f) => f.path)
-      .filter(Boolean);
+    // No path branch for an OS drop: Electron 32 removed File.path, and a
+    // sandboxed webview has no other way to learn where a file lives. The drop
+    // handler reads the contents instead.
+    return [];
   }
 
   /** Only files/URIs count — a text drag inside the editor must be left alone. */
@@ -818,9 +1069,24 @@
     const items = readDrop(e.dataTransfer);
     if (items.length) {
       send({ type: 'drop', items });
-    } else {
-      showNotice('Could not read the dropped files — use Import instead.');
+      return;
     }
+
+    // An OS drop can no longer say where the file lives, but the contents are
+    // still readable — so copy it into the library, the same as Import does.
+    // preventDefault() has already run above, and a File stays readable after
+    // this handler returns, so reading asynchronously is safe.
+    const files = Array.from(e.dataTransfer.files || []).filter(
+      (f) => f.name.toLowerCase().endsWith('.md') && f.size < 1_000_000
+    );
+    if (!files.length) {
+      showNotice('Could not read the dropped files — use Import instead.');
+      return;
+    }
+
+    Promise.all(files.map(async (f) => ({ name: f.name, text: await f.text() })))
+      .then((copies) => send({ type: 'dropText', files: copies }))
+      .catch(() => showNotice('Could not read the dropped files — use Import instead.'));
   });
 
   // ---------- inbound ----------
