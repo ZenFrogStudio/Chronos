@@ -114,6 +114,20 @@ export const STORE_KEY = 'chronus.state';
 /** Scheduler tick. A gap larger than 3x this means the process was suspended. */
 export const TICK_MS = 30_000;
 
+/**
+ * How long a remote command stays valid. Commands are applied synchronously, so
+ * a legitimate one is only ever seconds old; this bounds how long a captured
+ * request could be replayed, and would bound staleness if commands were ever
+ * queued while the desktop was unreachable.
+ */
+export const COMMAND_TTL_MS = 6 * 60 * 60_000;
+
+/**
+ * Tolerance for a command dated in the future. Phone and desktop clocks drift;
+ * a command dated far ahead would otherwise never expire.
+ */
+export const COMMAND_MAX_SKEW_MS = 60 * 60_000;
+
 /** Every day of the week — the "daily" recurrence. */
 export const DAILY: number[] = [0, 1, 2, 3, 4, 5, 6];
 
