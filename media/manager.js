@@ -27,7 +27,7 @@
   ];
   const SAVE_DEBOUNCE_MS = 2000;
 
-  /** @type {{plans: any[], external: any[], series: any[], runs: any[], costLast7Days: number, libraryPath: string, setupProblem?: string}} */
+  /** @type {{plans: any[], external: any[], series: any[], runs: any[], costLast7Days: number, libraryPath: string, setupProblem?: string, schedulerElsewhere?: boolean}} */
   let state = { plans: [], external: [], series: [], runs: [], costLast7Days: 0, libraryPath: '' };
 
   /** Selection and editor buffer live here, never in the DOM — a re-render
@@ -143,8 +143,15 @@
     costEl.textContent =
       state.costLast7Days > 0 ? `$${state.costLast7Days.toFixed(2)} over the last 7 days` : '';
 
+    // A broken CLI outranks a dormant scheduler: it breaks every window, not
+    // just this one.
     if (state.setupProblem) {
       setupEl.textContent = `Chronus cannot reach the Claude CLI. ${state.setupProblem}`;
+      setupEl.hidden = false;
+    } else if (state.schedulerElsewhere) {
+      setupEl.textContent =
+        'Another VS Code window is running the Chronus scheduler. ' +
+        'Nothing will run from this window, and changes made here may not reach it.';
       setupEl.hidden = false;
     } else {
       setupEl.hidden = true;

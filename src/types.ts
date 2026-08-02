@@ -115,6 +115,13 @@ export const STORE_KEY = 'chronus.state';
 export const TICK_MS = 30_000;
 
 /**
+ * How long a scheduler lock survives without a heartbeat. Three missed ticks:
+ * long enough that a busy window is not treated as gone, short enough that
+ * closing one window hands scheduling to another within a minute or two.
+ */
+export const LOCK_STALE_MS = TICK_MS * 3;
+
+/**
  * How long a remote command stays valid. Commands are applied synchronously, so
  * a legitimate one is only ever seconds old; this bounds how long a captured
  * request could be replayed, and would bound staleness if commands were ever
@@ -133,6 +140,13 @@ export const DAILY: number[] = [0, 1, 2, 3, 4, 5, 6];
 
 /** Finished runs retained in history. Recurring series would grow unbounded. */
 export const MAX_RECENT_RUNS = 50;
+
+/**
+ * Missed runs retained. Capped separately and more generously than finished
+ * ones: a missed run is still waiting for a decision, so it outlives a completed
+ * one — but a pile ignored for months should not grow the store without bound.
+ */
+export const MAX_MISSED_RUNS = 100;
 
 /** Error text stored per run. */
 export const ERROR_MAX_CHARS = 500;

@@ -7,6 +7,76 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0-rc.3] - 2026-08-02
+
+A full audit of the codebase, and the ten defects it found. Two of them could
+lose or duplicate real work; the rest are hardening. No feature changes.
+
+### Fixed
+
+- **A task queued behind a busy slot is no longer marked missed.** With
+  `maxConcurrent` at 1 — the default — any run lasting longer than the 15-minute
+  grace window caused whatever was queued behind it to age out and be reported as
+  *missed while VS Code was closed*, with the editor open in front of you. The
+  task then never ran. The scheduler now records the runs it deferred for
+  capacity and exempts them from the grace window, so a queued run waits rather
+  than expiring. Deferrals are held in memory, not the store: after a restart or
+  a suspend nothing was holding the run back, and the grace window should judge
+  it normally again.
+- **Two VS Code windows no longer run every scheduled task twice.** Each window
+  activates its own extension host, and `globalState` gives neither any sight of
+  the other's writes — so both saw the same task as due and both spawned an
+  agent for it, in the same repository, at the same moment. `maxConcurrent` could
+  not help; it counts one window's runs. A lock file beside the state now decides
+  which window schedules. The others show the UI, say so in a banner, and stay
+  out of the way. Closing the holder hands scheduling over within about a minute.
+  This also stops a second window reconciling — and failing — a run the first
+  window is still executing.
+- **One unusable repeat rule no longer stops every other task.** A recurrence
+  with no days, or a time that is not a wall clock, threw inside the scheduler's
+  tick, which caught it and moved on — silently halting the entire schedule every
+  30 seconds with nothing but a log line. A broken rule is now caught per series:
+  that one task is paused and reported, and everything else keeps running.
+- **Transcripts left behind by a crash are closed out on the next launch.**
+  Killing VS Code mid-run left the file without its footer and without its
+  `-failed` suffix, so the results folder stopped answering "which nights went
+  wrong" for exactly the runs that went most wrong. Reconciling an orphaned run
+  now appends the footer and applies the suffix.
+
+### Security
+
+- **The manager's schedule edits are validated rather than trusted.**
+  `updateSeries` accepted any `Partial<TaskSeries>` — a type erased at runtime —
+  and wrote it straight to the store. Two of those fields leave the process:
+  `model` becomes an argv entry for a shell-invoked spawn on Windows, where Node
+  does not quote arguments, and `filePath` decides which file the agent is handed
+  as its prompt. A new `edit.ts` checks every field against the same
+  allowlist-and-reject pattern `command.ts` already uses for the phone; identity
+  fields are not editable at all.
+- **Editing an external plan is confined to plans that are actually scheduled.**
+  `savePlan` would write arbitrary text to any absolute path the webview named.
+  The design note that justified bypassing the library guard rested on those
+  paths already being trusted because the runner executes them — true only of
+  paths in the schedule, which is now what the code checks.
+- **The webview CSP nonce comes from `crypto`,** not `Math.random()`.
+
+### Changed
+
+- Missed runs are capped at 100, so a catch-up decision that is never answered
+  cannot grow the store without bound. Finished runs keep their own cap of 50.
+  Pending and running runs are still never pruned.
+- `chronus.logRetentionDays` said it deleted transcripts; it deletes raw logs,
+  and the transcripts are kept indefinitely. The description now says so, and no
+  longer contradicts `chronus.resultsPath`.
+
+### Internal
+
+- New `vscode`-free modules on the test allowlist: `lock.ts` (which window
+  schedules), `edit.ts` (what the manager may change), `history.ts` (what is
+  pruned). Run-history pruning moved out of `store.ts` so the one place Chronus
+  deletes user data is covered by tests.
+- 257 tests across 59 suites, up from 201 across 45.
+
 ## [0.8.0-rc.2] - 2026-07-28
 
 ### Added

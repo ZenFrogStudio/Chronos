@@ -1,16 +1,9 @@
 import { randomUUID } from 'crypto';
 import * as vscode from 'vscode';
+import { pruneRuns } from './history';
 import { log } from './log';
 import { migrate } from './migrate';
-import {
-  ChronusState,
-  MAX_RECENT_RUNS,
-  SCHEMA_VERSION,
-  STORE_KEY,
-  TaskRun,
-  TaskSeries,
-  isFinished
-} from './types';
+import { ChronusState, SCHEMA_VERSION, STORE_KEY, TaskRun, TaskSeries } from './types';
 
 const BACKUP_KEY = 'chronus.state.backup';
 
@@ -134,26 +127,8 @@ export class Store {
     await this.persist();
   }
 
-  /**
-   * Caps finished-run history. Pending, running and missed runs are never
-   * pruned — they still need a decision or are still in flight.
-   */
-  private prune(): void {
-    const finished = this.state.runs.filter((r) => isFinished(r.status));
-    if (finished.length <= MAX_RECENT_RUNS) {
-      return;
-    }
-    const keep = new Set(
-      finished
-        .sort((a, b) => (b.finishedAt ?? b.scheduledAt).localeCompare(a.finishedAt ?? a.scheduledAt))
-        .slice(0, MAX_RECENT_RUNS)
-        .map((r) => r.id)
-    );
-    this.state.runs = this.state.runs.filter((r) => !isFinished(r.status) || keep.has(r.id));
-  }
-
   private async persist(): Promise<void> {
-    this.prune();
+    this.state.runs = pruneRuns(this.state.runs);
     await this.memento.update(STORE_KEY, this.state);
     this.emitter.fire();
   }

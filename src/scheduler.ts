@@ -1,20 +1,36 @@
 import * as vscode from 'vscode';
 import { Action, decide, newRun } from './decide';
+import { holdLock, releaseLock } from './lock';
 import { log } from './log';
 import { RunFinished, Runner } from './runner';
 import { newId, Store } from './store';
 import { nowUtc } from './time';
-import { MissedReason, TICK_MS, TaskRun } from './types';
+import { LOCK_STALE_MS, MissedReason, TICK_MS, TaskRun } from './types';
 
 export class Scheduler implements vscode.Disposable {
   private timer: NodeJS.Timeout | undefined;
   private lastTickMs = Date.now();
   private ticking = false;
+  /**
+   * Runs the previous tick held back for capacity. Deliberately in memory
+   * rather than the store: a deferral only means anything while this process is
+   * alive to keep making it. After a restart or a suspend the queue is gone,
+   * and the grace window should judge those runs on their own merits again.
+   */
+  private deferred = new Set<string>();
   private readonly subscription: vscode.Disposable;
+
+  /** This window's identity in the lock file. */
+  private readonly owner = newId();
+  /** Whether this window is the one that schedules. See `lock.ts`. */
+  private holdsLock = false;
+  private readonly leadershipChanged = new vscode.EventEmitter<void>();
+  readonly onDidChangeLeadership = this.leadershipChanged.event;
 
   constructor(
     private readonly store: Store,
-    private readonly runner: Runner
+    private readonly runner: Runner,
+    private readonly lockFile: string
   ) {
     this.subscription = runner.onDidFinish((e) => {
       void this.onFinished(e);
@@ -25,11 +41,25 @@ export class Scheduler implements vscode.Disposable {
     if (this.timer) {
       clearInterval(this.timer);
     }
+    if (this.holdsLock) {
+      releaseLock(this.lockFile, this.owner);
+    }
     this.subscription.dispose();
+    this.leadershipChanged.dispose();
   }
 
+  /** True when this window is the one running the schedule. */
+  get leading(): boolean {
+    return this.holdsLock;
+  }
+
+  /**
+   * Note that nothing is reconciled here. That happens in `claimLeadership`,
+   * once this window is known to be the one scheduling: a run left `running` may
+   * belong to another window that is still executing it, and failing it from
+   * here would requeue work that is already in flight.
+   */
   async start(): Promise<void> {
-    await this.reconcile();
     this.timer = setInterval(() => void this.tick(), TICK_MS);
     await this.tick();
   }
@@ -44,6 +74,13 @@ export class Scheduler implements vscode.Disposable {
     if (!series) {
       return;
     }
+    if (!this.holdsLock) {
+      // The run would land in this window's copy of the state, which the window
+      // that actually schedules will never read. Better to refuse than to queue
+      // something that silently never fires.
+      log.warn('run now ignored — another window holds the Chronus scheduler');
+      return;
+    }
     await this.store.addRun({ ...newRun(series, nowUtc(), 1, newId()), manual: true });
     await this.tick();
   }
@@ -54,16 +91,51 @@ export class Scheduler implements vscode.Disposable {
   }
 
   /**
+   * Renews or claims the scheduler lock, and reports whether this window should
+   * act on this tick. A window that has just taken over inherits responsibility
+   * for whatever the previous holder left running.
+   */
+  private async claimLeadership(now: number): Promise<boolean> {
+    const before = this.holdsLock;
+    this.holdsLock = holdLock(this.lockFile, this.owner, now, LOCK_STALE_MS);
+
+    if (this.holdsLock === before) {
+      return this.holdsLock;
+    }
+
+    this.leadershipChanged.fire();
+
+    if (!this.holdsLock) {
+      // Another window took over while we were suspended. Anything we still
+      // have running keeps running; we simply stop deciding.
+      log.info('another window now holds the Chronus scheduler — standing by');
+      this.deferred.clear();
+      return false;
+    }
+
+    log.info('holding the Chronus scheduler for this window');
+    await this.reconcile();
+    return true;
+  }
+
+  /**
    * A run left `running` has no process behind it — VS Code closed mid-flight.
    * Without this the concurrency slot is held forever.
    */
   private async reconcile(): Promise<void> {
     const orphans = this.store.getRuns().filter((r) => r.status === 'running');
     for (const run of orphans) {
+      const error = 'Interrupted — VS Code closed during execution.';
+      const startedAtMs = run.startedAt ? Date.parse(run.startedAt) : Date.now();
       await this.store.updateRun(run.id, {
         status: 'failed',
         finishedAt: nowUtc(),
-        lastError: 'Interrupted — VS Code closed during execution.'
+        lastError: error,
+        resultPath: this.runner.finaliseInterrupted(
+          run.resultPath,
+          error,
+          Math.max(0, Date.now() - startedAtMs)
+        )
       });
       log.warn(`reconciled orphaned run ${run.id}`);
       await this.afterTerminalOutcome(run, true);
@@ -94,6 +166,16 @@ export class Scheduler implements vscode.Disposable {
     this.lastTickMs = now;
     const reason: MissedReason = drift > TICK_MS * 3 ? 'sleep' : 'not-running';
 
+    // Nothing was holding these back across a suspend — the machine was. Drop
+    // the deferrals so the grace window judges them as the missed runs they are.
+    if (reason === 'sleep') {
+      this.deferred.clear();
+    }
+
+    if (!(await this.claimLeadership(now))) {
+      return;
+    }
+
     this.runner.checkWatchdogs();
 
     const actions = decide({
@@ -104,8 +186,15 @@ export class Scheduler implements vscode.Disposable {
       reason,
       isSeriesRunning: (id) => this.runner.isSeriesRunning(id),
       freeSlots: this.runner.freeSlots(),
+      wasDeferred: (id) => this.deferred.has(id),
       newId
     });
+
+    // Replaced rather than added to: a run that started, was dropped or fell out
+    // of the queue simply stops appearing, so the set prunes itself.
+    this.deferred = new Set(
+      actions.flatMap((a) => (a.kind === 'defer' ? [a.runId] : []))
+    );
 
     for (const action of actions) {
       await this.apply(action);
@@ -124,8 +213,13 @@ export class Scheduler implements vscode.Disposable {
         return this.store.removeRun(action.id);
       case 'start':
         return this.runner.begin(action.series, action.run);
+      case 'defer':
+        // Recorded in `deferred` by evaluate(). Nothing to write.
+        return;
       case 'announceMissed':
         return this.announceMissed(action.count, action.reason);
+      case 'announceBroken':
+        return this.announceBroken(action.fileName, action.problem);
     }
   }
 
@@ -182,6 +276,20 @@ export class Scheduler implements vscode.Disposable {
           log.show();
         }
       });
+  }
+
+  /**
+   * A repeat rule that cannot produce an occurrence has been paused by
+   * `decide`. Said out loud rather than only logged: the task has stopped, and
+   * a silently stopped scheduled task is the failure this whole design is
+   * built to avoid.
+   */
+  private announceBroken(fileName: string, problem: string): void {
+    log.error(`paused ${fileName} — unusable repeat rule: ${problem}`);
+    vscode.window.showErrorMessage(
+      `Chronus: paused "${fileName}" — its repeat rule is unusable (${problem}). ` +
+        'Set its schedule again to start it back up.'
+    );
   }
 
   private announceMissed(count: number, reason: MissedReason): void {

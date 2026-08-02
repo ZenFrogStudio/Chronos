@@ -1,0 +1,161 @@
+import assert from 'node:assert/strict';
+import { describe, it } from 'node:test';
+import { seriesEdit } from '../src/edit';
+import { DAILY } from '../src/types';
+
+/**
+ * The manager's edit boundary. `Partial<TaskSeries>` is a compile-time hint that
+ * disappears at runtime, so these are the rules that actually hold.
+ */
+
+describe('edit — fields that must never be settable', () => {
+  it('should_refuse_to_repoint_a_series_at_another_file', () => {
+    // `filePath` decides which file the agent is handed as its prompt.
+    const { patch, rejected } = seriesEdit({ filePath: 'D:\\somewhere\\else.md' });
+
+    assert.deepEqual(patch, {});
+    assert.deepEqual(rejected, ['filePath']);
+  });
+
+  it('should_refuse_to_change_a_series_identity', () => {
+    const { patch, rejected } = seriesEdit({ id: 'other', fileName: 'x.md', createdAt: 'then' });
+
+    assert.deepEqual(patch, {});
+    assert.deepEqual(rejected.sort(), ['createdAt', 'fileName', 'id']);
+  });
+
+  it('should_drop_a_field_smuggled_in_alongside_a_valid_one', () => {
+    const { patch, rejected } = seriesEdit({ enabled: false, filePath: 'D:\\evil.md' });
+
+    assert.deepEqual(patch, { enabled: false });
+    assert.deepEqual(rejected, ['filePath']);
+  });
+
+  it('should_drop_a_field_that_is_not_part_of_a_series_at_all', () => {
+    const { patch, rejected } = seriesEdit({ enabled: true, somethingElse: 1 });
+
+    assert.deepEqual(patch, { enabled: true });
+    assert.deepEqual(rejected, ['somethingElse']);
+  });
+
+  it('should_reject_a_patch_that_is_not_an_object', () => {
+    assert.deepEqual(seriesEdit('enabled=true').patch, {});
+    assert.deepEqual(seriesEdit(null).patch, {});
+  });
+});
+
+describe('edit — the model argument', () => {
+  it('should_accept_a_pinned_model_id', () => {
+    assert.deepEqual(seriesEdit({ model: 'claude-opus-5' }).patch, { model: 'claude-opus-5' });
+  });
+
+  it('should_accept_a_bare_family_alias', () => {
+    assert.deepEqual(seriesEdit({ model: 'sonnet' }).patch, { model: 'sonnet' });
+  });
+
+  it('should_read_an_empty_model_as_the_account_default', () => {
+    const { patch, rejected } = seriesEdit({ model: '' });
+
+    assert.deepEqual(patch, { model: undefined });
+    assert.deepEqual(rejected, []);
+  });
+
+  it('should_reject_a_model_carrying_shell_syntax', () => {
+    // The reason this check exists: `runner.ts` spawns through a shell on
+    // Windows, and Node does not quote arguments in shell mode.
+    for (const hostile of ['sonnet & calc', 'sonnet | more', 'sonnet;whoami', '"sonnet"', '$(id)']) {
+      const { patch, rejected } = seriesEdit({ model: hostile });
+      assert.deepEqual(patch, {}, `should have rejected ${hostile}`);
+      assert.deepEqual(rejected, ['model']);
+    }
+  });
+
+  it('should_reject_a_model_long_enough_to_be_a_payload', () => {
+    assert.deepEqual(seriesEdit({ model: 'a'.repeat(200) }).rejected, ['model']);
+  });
+});
+
+describe('edit — permissions', () => {
+  it('should_accept_a_real_permission_mode', () => {
+    assert.deepEqual(seriesEdit({ permissionMode: 'bypassPermissions' }).patch, {
+      permissionMode: 'bypassPermissions'
+    });
+  });
+
+  it('should_reject_a_permission_mode_the_cli_does_not_have', () => {
+    assert.deepEqual(seriesEdit({ permissionMode: 'trustMe' }).rejected, ['permissionMode']);
+  });
+});
+
+describe('edit — the schedule', () => {
+  it('should_normalise_a_valid_time_to_utc', () => {
+    const { patch } = seriesEdit({ nextRunAt: '2026-07-26T12:00:00+02:00' });
+
+    assert.equal(patch.nextRunAt, '2026-07-26T10:00:00.000Z');
+  });
+
+  it('should_reject_a_time_that_is_not_a_date', () => {
+    assert.deepEqual(seriesEdit({ nextRunAt: 'soon' }).rejected, ['nextRunAt']);
+    assert.deepEqual(seriesEdit({ nextRunAt: 12345 }).rejected, ['nextRunAt']);
+  });
+
+  it('should_accept_a_one_shot_by_clearing_the_recurrence', () => {
+    const { patch, rejected } = seriesEdit({ recurrence: null });
+
+    assert.deepEqual(patch, { recurrence: null });
+    assert.deepEqual(rejected, []);
+  });
+
+  it('should_accept_a_daily_rule', () => {
+    const { patch } = seriesEdit({ recurrence: { daysOfWeek: DAILY, timeLocal: '09:00' } });
+
+    assert.deepEqual(patch.recurrence, { daysOfWeek: DAILY, timeLocal: '09:00' });
+  });
+
+  it('should_sort_and_deduplicate_the_days_of_a_weekly_rule', () => {
+    const { patch } = seriesEdit({ recurrence: { daysOfWeek: [5, 1, 1, 3], timeLocal: '09:00' } });
+
+    assert.deepEqual(patch.recurrence?.daysOfWeek, [1, 3, 5]);
+  });
+
+  it('should_reject_a_recurrence_with_no_days', () => {
+    // This is the one that would stop *every* task: an empty rule makes
+    // computeNextRun throw, inside the scheduler's tick.
+    assert.deepEqual(seriesEdit({ recurrence: { daysOfWeek: [], timeLocal: '09:00' } }).rejected, [
+      'recurrence'
+    ]);
+  });
+
+  it('should_reject_a_recurrence_with_a_day_outside_the_week', () => {
+    assert.deepEqual(seriesEdit({ recurrence: { daysOfWeek: [0, 9], timeLocal: '09:00' } }).rejected, [
+      'recurrence'
+    ]);
+  });
+
+  it('should_reject_a_recurrence_whose_time_is_not_a_wall_clock', () => {
+    for (const bad of ['9:00', '25:00', '09:60', 'morning', '']) {
+      assert.deepEqual(
+        seriesEdit({ recurrence: { daysOfWeek: DAILY, timeLocal: bad } }).rejected,
+        ['recurrence'],
+        `should have rejected ${bad}`
+      );
+    }
+  });
+});
+
+describe('edit — retries and working directory', () => {
+  it('should_accept_a_retry_count_within_the_configured_ceiling', () => {
+    assert.deepEqual(seriesEdit({ maxRetries: 0 }).patch, { maxRetries: 0 });
+    assert.deepEqual(seriesEdit({ maxRetries: 10 }).patch, { maxRetries: 10 });
+  });
+
+  it('should_reject_a_retry_count_that_is_negative_fractional_or_absurd', () => {
+    for (const bad of [-1, 1.5, 11, '3']) {
+      assert.deepEqual(seriesEdit({ maxRetries: bad }).rejected, ['maxRetries'], `${bad}`);
+    }
+  });
+
+  it('should_reject_an_empty_working_directory', () => {
+    assert.deepEqual(seriesEdit({ cwd: '   ' }).rejected, ['cwd']);
+  });
+});

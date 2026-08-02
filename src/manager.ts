@@ -1,6 +1,8 @@
+import { randomBytes } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
+import { seriesEdit } from './edit';
 import * as library from './library';
 import { log } from './log';
 import { Scheduler } from './scheduler';
@@ -51,6 +53,7 @@ export class Manager implements vscode.Disposable {
   private externalDebounce: NodeJS.Timeout | undefined;
   private externalWatched: string | undefined;
   private readonly storeListener: vscode.Disposable;
+  private readonly leadershipListener: vscode.Disposable;
   /** Sticky, unlike a notice: a broken `claudePath` stays broken until fixed. */
   private setupProblem: string | undefined;
 
@@ -62,10 +65,14 @@ export class Manager implements vscode.Disposable {
     private readonly resultsPath: () => string
   ) {
     this.storeListener = store.onDidChange(() => this.post());
+    // A non-leading window's store never changes, so the banner below would
+    // otherwise never appear or clear.
+    this.leadershipListener = scheduler.onDidChangeLeadership(() => this.post());
   }
 
   dispose(): void {
     this.storeListener.dispose();
+    this.leadershipListener.dispose();
     this.stopWatching();
     this.panel?.dispose();
   }
@@ -264,6 +271,9 @@ export class Manager implements vscode.Disposable {
 
       case 'loadPlan':
         if (message.external && message.filePath) {
+          if (!this.isScheduledPlan(message.filePath)) {
+            return this.refuseExternal(message.filePath);
+          }
           this.watchExternalPlan(message.filePath);
           this.sendText(dir, message.name, message.filePath);
         } else {
@@ -273,6 +283,9 @@ export class Manager implements vscode.Disposable {
 
       case 'savePlan':
         if (message.external && message.filePath) {
+          if (!this.isScheduledPlan(message.filePath)) {
+            return this.refuseExternal(message.filePath);
+          }
           library.writePlanAt(message.filePath, message.text);
         } else {
           library.writePlan(dir, message.name, message.text);
@@ -315,8 +328,16 @@ export class Manager implements vscode.Disposable {
         return;
       }
 
-      case 'updateSeries':
-        return this.store.updateSeries(message.id, message.patch);
+      case 'updateSeries': {
+        const { patch, rejected } = seriesEdit(message.patch);
+        if (rejected.length) {
+          log.warn(`updateSeries: ignored ${rejected.join(', ')}`);
+        }
+        if (!Object.keys(patch).length) {
+          return;
+        }
+        return this.store.updateSeries(message.id, patch);
+      }
 
       case 'removeSeries':
         return this.store.removeSeries(message.id);
@@ -340,6 +361,12 @@ export class Manager implements vscode.Disposable {
       }
 
       case 'runNow':
+        if (!this.scheduler.leading) {
+          this.notify(
+            'Another VS Code window is running the Chronus scheduler. Use that window, or close it.'
+          );
+          return;
+        }
         if (message.dismissRunId) {
           await this.store.removeRun(message.dismissRunId);
         }
@@ -388,6 +415,26 @@ export class Manager implements vscode.Disposable {
       default:
         log.warn(`unhandled manager message: ${JSON.stringify(message)}`);
     }
+  }
+
+  /**
+   * Whether an absolute path is one of the external plans Chronus is scheduled
+   * to run.
+   *
+   * External plans bypass `resolveInLibrary` deliberately — that guard governs
+   * name-derived paths, and an absolute path the user explicitly scheduled is
+   * already trusted at a higher level, since the runner reads and executes it.
+   * That reasoning only holds for paths actually *in* the schedule, so this is
+   * the check that makes it true. Without it, `savePlan` would write arbitrary
+   * text to any path the webview named.
+   */
+  private isScheduledPlan(filePath: string): boolean {
+    return this.store.getSeries().some((s) => samePath(s.filePath, filePath));
+  }
+
+  private refuseExternal(filePath: string): void {
+    log.warn(`refused an external plan path that is not scheduled: ${filePath}`);
+    this.notify('That file is not a scheduled plan — Chronus will not read or write it.');
   }
 
   /**
@@ -477,7 +524,8 @@ export class Manager implements vscode.Disposable {
       series: this.store.getSeries(),
       runs: this.store.getRuns(),
       costLast7Days: this.store.costLast7Days(),
-      setupProblem: this.setupProblem
+      setupProblem: this.setupProblem,
+      schedulerElsewhere: !this.scheduler.leading
     });
   }
 
@@ -530,11 +578,8 @@ function dedupeByPath<T extends { filePath: string }>(items: T[]): T[] {
   });
 }
 
+/** Cryptographic, not `Math.random`: a nonce is the CSP's only guarantee that a
+ *  `<script>` in this document came from us. */
 function createNonce(): string {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  let out = '';
-  for (let i = 0; i < 32; i++) {
-    out += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return out;
+  return randomBytes(24).toString('base64');
 }

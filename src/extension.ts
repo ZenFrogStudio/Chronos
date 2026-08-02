@@ -1,3 +1,4 @@
+import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { ensureLibrary, seedLibrary } from './library';
@@ -20,7 +21,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const resultsPath = () => resolveResultsPath(libraryPath());
 
   const runner = new Runner(store, logDir, resultsPath);
-  const scheduler = new Scheduler(store, runner);
+  // Beside the state it guards, so every window for this install agrees on it.
+  const lockFile = path.join(context.globalStorageUri.fsPath, 'scheduler.lock');
+  fs.mkdirSync(context.globalStorageUri.fsPath, { recursive: true });
+  const scheduler = new Scheduler(store, runner, lockFile);
 
   if (ensureLibrary(libraryPath())) {
     seedLibrary(libraryPath());

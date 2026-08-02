@@ -59,6 +59,44 @@ export class Runner implements vscode.Disposable {
       run.child.kill();
     }
     this.finished.dispose();
+    // The streams are deliberately left open. Ending them here would race
+    // `settle`, which still runs whenever the child's `close` event arrives —
+    // and it does whenever the extension is deactivated without the host
+    // exiting, as on a window reload. `settle` would then be writing a footer to
+    // an ended stream, lose both the footer and the rename, and mark the run
+    // `failed` so that `finaliseInterrupted` skips it on the next launch too.
+    // Letting `settle` finish the job when it can, and finalising on the next
+    // launch when it cannot, covers both without the race.
+  }
+
+  /**
+   * Closes out a transcript abandoned by a window that died mid-run.
+   *
+   * The footer and the `-failed` rename normally happen in `settle()`, which a
+   * killed extension host never reaches. Left alone, those transcripts keep
+   * their un-suffixed name — so the results folder stops answering "which nights
+   * went wrong" for precisely the runs that went most wrong. Called from
+   * `Scheduler.reconcile()` on the next launch, where there is time to do it.
+   */
+  finaliseInterrupted(
+    resultPath: string | undefined,
+    error: string,
+    durationMs: number
+  ): string | undefined {
+    if (!resultPath || !fs.existsSync(resultPath)) {
+      return resultPath;
+    }
+
+    try {
+      const outcome: Outcome = { ok: false, error, denials: 0, retryable: true };
+      fs.appendFileSync(resultPath, transcriptFooter(outcome, durationMs), 'utf8');
+      const target = withStatus(resultPath, 'failed');
+      fs.renameSync(resultPath, target);
+      return target;
+    } catch (err) {
+      log.warn(`could not finalise an interrupted transcript: ${String(err)}`);
+      return resultPath;
+    }
   }
 
   get activeCount(): number {

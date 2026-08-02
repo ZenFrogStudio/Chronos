@@ -20,7 +20,11 @@ function write(level: string, message: string): void {
   channel?.appendLine(`${new Date().toISOString()} [${level}] ${message}`);
 }
 
-/** Drops run transcripts past the retention window. Best-effort. */
+/**
+ * Drops raw run logs past the retention window. Best-effort, and deliberately
+ * only the raw stream: the readable Markdown transcripts are the record of what
+ * ran unattended, and they are kept indefinitely.
+ */
 export function pruneLogs(dir: string, retentionDays: number): void {
   const cutoff = Date.now() - retentionDays * 24 * 60 * 60_000;
   let removed = 0;

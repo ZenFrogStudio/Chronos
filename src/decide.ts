@@ -16,7 +16,11 @@ export type Action =
   | { kind: 'updateRun'; id: string; patch: Partial<TaskRun> }
   | { kind: 'removeRun'; id: string }
   | { kind: 'start'; series: TaskSeries; run: TaskRun }
-  | { kind: 'announceMissed'; count: number; reason: MissedReason };
+  /** Due, but held back for capacity. Reported so the next tick knows it was us. */
+  | { kind: 'defer'; runId: string }
+  | { kind: 'announceMissed'; count: number; reason: MissedReason }
+  /** A repeat rule that cannot produce an occurrence. Paired with a pause. */
+  | { kind: 'announceBroken'; fileName: string; problem: string };
 
 export interface DecideInput {
   series: readonly TaskSeries[];
@@ -28,6 +32,16 @@ export interface DecideInput {
   reason: MissedReason;
   isSeriesRunning: (seriesId: string) => boolean;
   freeSlots: number;
+  /**
+   * Whether a live scheduler already held this run back on an earlier tick.
+   *
+   * The grace window exists to catch runs nothing was watching — the editor was
+   * closed, the machine was asleep. A run this scheduler queued for capacity is
+   * the opposite case: it is waiting, on a machine demonstrably awake, because
+   * we told it to. Judging it against the same window marks it missed for our
+   * own doing, and reports the reason as a suspend that never happened.
+   */
+  wasDeferred: (runId: string) => boolean;
   /** Injected so decisions stay deterministic under test. */
   newId: () => string;
 }
@@ -67,15 +81,37 @@ export function decide(input: DecideInput): Action[] {
       continue;
     }
 
-    if (overdue <= graceMs) {
-      const run = newRun(series, series.nextRunAt, 1, input.newId());
-      actions.push({ kind: 'addRun', run });
-      candidates.push(run);
-      actions.push({ kind: 'updateSeries', id: series.id, patch: advanceOf(series, now) });
-    } else {
-      actions.push({ kind: 'addRun', run: missedRun(series, reason, now, nowIso, input.newId()) });
-      actions.push({ kind: 'updateSeries', id: series.id, patch: advanceOf(series, now) });
+    // A recurrence with no days, or a time that is not a wall clock, makes
+    // `computeNextRun` throw. Caught per series and resolved before anything is
+    // pushed: an escape from here aborts the whole tick, so one unusable rule
+    // would silently stop every other task in the list from ever running.
+    let advance: Partial<TaskSeries>;
+    let run: TaskRun;
+    try {
+      advance = advanceOf(series, now);
+      run =
+        overdue <= graceMs
+          ? newRun(series, series.nextRunAt, 1, input.newId())
+          : missedRun(series, reason, now, nowIso, input.newId());
+    } catch (err) {
+      // Permanent, like a missing plan file: retrying throws identically. Pause
+      // it so the tick stops tripping over it, and say so.
+      actions.push({ kind: 'updateSeries', id: series.id, patch: { enabled: false } });
+      actions.push({
+        kind: 'announceBroken',
+        fileName: series.fileName,
+        problem: err instanceof Error ? err.message : String(err)
+      });
+      continue;
+    }
+
+    actions.push({ kind: 'addRun', run });
+    actions.push({ kind: 'updateSeries', id: series.id, patch: advance });
+
+    if (run.status === 'missed') {
       missedCount++;
+    } else {
+      candidates.push(run);
     }
   }
 
@@ -96,7 +132,7 @@ export function decide(input: DecideInput): Action[] {
       continue;
     }
 
-    if (overdue > graceMs) {
+    if (overdue > graceMs && !input.wasDeferred(run.id)) {
       actions.push({
         kind: 'updateRun',
         id: run.id,
@@ -112,12 +148,13 @@ export function decide(input: DecideInput): Action[] {
       continue;
     }
 
-    // Overlap guard: never stack a second run on one series.
-    if (input.isSeriesRunning(series.id) || starting.has(series.id)) {
+    // Overlap guard (never stack a second run on one series) and the
+    // concurrency gate. Both mean "wait", so both defer rather than break: a
+    // run left unreported here would age out of the grace window above and be
+    // marked missed on a later tick.
+    if (input.isSeriesRunning(series.id) || starting.has(series.id) || slots <= 0) {
+      actions.push({ kind: 'defer', runId: run.id });
       continue;
-    }
-    if (slots <= 0) {
-      break;
     }
 
     actions.push({ kind: 'start', series, run });

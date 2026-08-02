@@ -2,7 +2,7 @@
   "name": "chronus",
   "displayName": "Chronus",
   "description": "Schedule Claude Code tasks from Markdown plan files.",
-  "version": "0.8.0-rc.2",
+  "version": "0.8.0-rc.3",
   "publisher": "onemedialabs",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -127,7 +127,7 @@
           "type": "number",
           "default": 30,
           "minimum": 1,
-          "description": "Delete run transcripts older than this on startup."
+          "markdownDescription": "Delete raw run logs older than this on startup. This does not touch the Markdown transcripts in `chronus.resultsPath`, which are kept indefinitely."
         }
       }
     }

@@ -5,9 +5,9 @@ import { TaskRun, TaskSeries } from './types';
  *
  * Pure — no `vscode`, no network — so the privacy boundary is a unit test
  * rather than a matter of care. Both mappers below are written out field by
- * field on purpose: a spread of the source object would silently start
- * uploading every field added to `TaskSeries` or `TaskRun` from then on, and
- * the first time anyone noticed would be after it had happened.
+ * field on purpose: a spread of the source object would silently start sending
+ * every field added to `TaskSeries` or `TaskRun` from then on, and the first
+ * time anyone noticed would be after it had happened.
  */
 
 /** A series as the phone sees it. No local filesystem paths. */
@@ -47,8 +47,8 @@ export interface RemoteRun {
 
 /**
  * `filePath` and `cwd` are absolute paths into the user's filesystem. The phone
- * displays `fileName`, so uploading them would put the machine's directory
- * layout in a cloud database in exchange for nothing.
+ * displays `fileName`, so putting them on the wire would publish the machine's
+ * directory layout in exchange for nothing.
  */
 export function toRemoteSeries(series: TaskSeries): RemoteSeries {
   return {
@@ -66,9 +66,10 @@ export function toRemoteSeries(series: TaskSeries): RemoteSeries {
 }
 
 /**
- * `logPath` and `resultPath` are local paths; the transcript is uploaded to
- * storage under the run's id instead. `sessionId` would let a holder of the
- * database resume the conversation, and `exitCode` means nothing on a phone.
+ * `logPath` and `resultPath` are local paths; the transcript is fetched by run
+ * id instead, and the server resolves the path itself. `sessionId` would let a
+ * holder of the response resume the agent's conversation, and `exitCode` means
+ * nothing on a phone.
  */
 export function toRemoteRun(run: TaskRun): RemoteRun {
   return {

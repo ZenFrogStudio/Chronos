@@ -55,6 +55,7 @@ function act(overrides: Partial<DecideInput> = {}): Action[] {
     reason: 'not-running',
     isSeriesRunning: () => false,
     freeSlots: 1,
+    wasDeferred: () => false,
     newId: ids(),
     ...overrides
   });
@@ -63,6 +64,8 @@ function act(overrides: Partial<DecideInput> = {}): Action[] {
 const starts = (actions: Action[]) => actions.filter((a) => a.kind === 'start');
 const added = (actions: Action[]) =>
   actions.flatMap((a) => (a.kind === 'addRun' ? [a.run] : []));
+const deferrals = (actions: Action[]) =>
+  actions.flatMap((a) => (a.kind === 'defer' ? [a.runId] : []));
 const seriesPatch = (actions: Action[], id: string) =>
   actions.flatMap((a) => (a.kind === 'updateSeries' && a.id === id ? [a.patch] : []));
 
@@ -266,6 +269,143 @@ describe('decide — the grace window', () => {
     const announcements = actions.filter((a) => a.kind === 'announceMissed');
     assert.equal(announcements.length, 1);
     assert.equal(announcements[0].kind === 'announceMissed' && announcements[0].count, 2);
+  });
+});
+
+describe('decide — an unusable repeat rule', () => {
+  const broken = { daysOfWeek: [], timeLocal: '09:00' };
+
+  it('should_not_let_one_broken_rule_stop_every_other_task', () => {
+    // The rule throws inside computeNextRun, and the tick that calls decide()
+    // catches everything — so an escape from here would silently stop the whole
+    // schedule, for every task, every 30 seconds.
+    const bad = series({ id: 'bad', recurrence: broken });
+    const good = series({ id: 'good' });
+
+    const actions = act({ series: [bad, good] });
+
+    assert.equal(starts(actions).length, 1, 'the healthy task still runs');
+    assert.equal(starts(actions)[0].kind === 'start' && starts(actions)[0].series.id, 'good');
+  });
+
+  it('should_pause_a_series_whose_rule_cannot_produce_an_occurrence', () => {
+    const bad = series({ id: 'bad', recurrence: broken });
+
+    const actions = act({ series: [bad] });
+
+    assert.deepEqual(seriesPatch(actions, 'bad'), [{ enabled: false }]);
+  });
+
+  it('should_say_out_loud_that_a_task_was_paused_for_a_broken_rule', () => {
+    const bad = series({ id: 'bad', fileName: 'nightly.md', recurrence: broken });
+
+    const actions = act({ series: [bad] });
+
+    const announced = actions.filter((a) => a.kind === 'announceBroken');
+    assert.equal(announced.length, 1);
+    assert.equal(announced[0].kind === 'announceBroken' && announced[0].fileName, 'nightly.md');
+  });
+
+  it('should_not_create_a_run_for_a_series_it_could_not_advance', () => {
+    // Adding the run before the advance threw would materialise a fresh one on
+    // every tick, forever.
+    const bad = series({ id: 'bad', recurrence: broken });
+
+    const actions = act({ series: [bad] });
+
+    assert.deepEqual(added(actions), []);
+  });
+
+  it('should_pause_a_series_whose_recurrence_time_is_not_a_wall_clock', () => {
+    const bad = series({ id: 'bad', recurrence: { daysOfWeek: DAILY, timeLocal: '25:99' } });
+
+    const actions = act({ series: [bad] });
+
+    assert.deepEqual(seriesPatch(actions, 'bad'), [{ enabled: false }]);
+  });
+});
+
+describe('decide — runs held back by the concurrency gate', () => {
+  it('should_defer_rather_than_start_a_run_with_no_free_slot', () => {
+    const s = series({ spent: true });
+    const queued = run();
+
+    const actions = act({ series: [s], runs: [queued], freeSlots: 0 });
+
+    assert.deepEqual(deferrals(actions), [queued.id]);
+    assert.deepEqual(starts(actions), []);
+  });
+
+  it('should_defer_every_run_behind_a_full_gate_not_only_the_first', () => {
+    // Bailing out on the first blocked run would leave the rest unreported, and
+    // the grace window would then mark them missed on a later tick.
+    const a = series({ id: 'a', spent: true });
+    const b = series({ id: 'b', spent: true });
+    const ra = run({ id: 'ra', seriesId: 'a' });
+    const rb = run({ id: 'rb', seriesId: 'b' });
+
+    const actions = act({ series: [a, b], runs: [ra, rb], freeSlots: 0 });
+
+    assert.deepEqual(deferrals(actions).sort(), ['ra', 'rb']);
+  });
+
+  it('should_defer_a_run_whose_series_is_already_running', () => {
+    const s = series({ spent: true });
+    const queued = run();
+
+    const actions = act({ series: [s], runs: [queued], isSeriesRunning: (id) => id === s.id });
+
+    assert.deepEqual(deferrals(actions), [queued.id]);
+    assert.deepEqual(starts(actions), []);
+  });
+
+  it('should_not_miss_a_run_the_scheduler_itself_queued_past_the_grace_window', () => {
+    // The defect: a long run holds the only slot, the task queued behind it ages
+    // out of the grace window, and it is reported as missed because the editor
+    // was closed — while the editor is open in front of you.
+    const s = series({ spent: true });
+    const waiting = run({ scheduledAt: new Date(NOW - 40 * MINUTE).toISOString() });
+
+    const actions = act({
+      series: [s],
+      runs: [waiting],
+      freeSlots: 0,
+      wasDeferred: () => true
+    });
+
+    assert.deepEqual(
+      actions.filter((a) => a.kind === 'updateRun'),
+      [],
+      'a queued run is waiting, not missed'
+    );
+    assert.deepEqual(deferrals(actions), [waiting.id]);
+  });
+
+  it('should_start_a_deferred_run_past_its_window_as_soon_as_a_slot_frees_up', () => {
+    const s = series({ spent: true });
+    const waiting = run({ scheduledAt: new Date(NOW - 40 * MINUTE).toISOString() });
+
+    const actions = act({
+      series: [s],
+      runs: [waiting],
+      freeSlots: 1,
+      wasDeferred: () => true
+    });
+
+    assert.equal(starts(actions).length, 1);
+  });
+
+  it('should_still_miss_a_queued_run_once_nothing_is_holding_it_back', () => {
+    // After a restart or a suspend the deferral is gone, and a run well past its
+    // window is genuinely missed rather than merely waiting for a slot.
+    const s = series({ spent: true });
+    const waiting = run({ scheduledAt: new Date(NOW - 40 * MINUTE).toISOString() });
+
+    const actions = act({ series: [s], runs: [waiting], freeSlots: 1 });
+
+    const patch = actions.find((a) => a.kind === 'updateRun');
+    assert.ok(patch && patch.kind === 'updateRun');
+    assert.equal(patch.patch.status, 'missed');
   });
 });
 
