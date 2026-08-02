@@ -82,6 +82,40 @@ export function isPlanFile(name: string): boolean {
   return path.extname(name).toLowerCase() === EXTENSION;
 }
 
+/**
+ * Whether two paths address the same file. Resolved first, so `..` segments and
+ * mixed separators do not defeat the comparison.
+ *
+ * Case is folded only where the filesystem folds it. On Linux `Plan.md` and
+ * `plan.md` are two different files, and treating them as one would let a caller
+ * write to a file it did not name — the opposite of what the callers below want.
+ * `ignoreCase` is a parameter rather than a bare `process.platform` check so both
+ * branches are reachable from a test on either platform.
+ */
+export function samePath(a: string, b: string, ignoreCase = process.platform === 'win32'): boolean {
+  const left = path.resolve(a);
+  const right = path.resolve(b);
+  return ignoreCase ? left.toLowerCase() === right.toLowerCase() : left === right;
+}
+
+/**
+ * Whether an absolute path is one of the plans Chronus is scheduled to run.
+ *
+ * External plans bypass `resolveInLibrary` deliberately — that guard governs
+ * name-derived paths, and an absolute path the user explicitly scheduled is
+ * already trusted at a higher level, since the runner reads and executes it.
+ * That reasoning only holds for paths actually *in* the schedule, so this is the
+ * check that makes it true. Without it, `savePlan` would write arbitrary text to
+ * any path the webview named.
+ */
+export function isScheduledPlan(
+  scheduledPaths: readonly string[],
+  candidate: string,
+  ignoreCase = process.platform === 'win32'
+): boolean {
+  return scheduledPaths.some((scheduled) => samePath(scheduled, candidate, ignoreCase));
+}
+
 export const titleOf = (name: string): string => name.slice(0, -path.extname(name).length);
 
 /**

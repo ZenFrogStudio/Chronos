@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { Outcome } from '../src/outcome';
 import {
+  FinaliseOps,
+  finaliseInterrupted,
   localStamp,
   parseLine,
   toAnsi,
@@ -208,5 +210,92 @@ describe('transcriptFooter', () => {
 describe('localStamp', () => {
   it('should_format_local_wall_clock_time_zero_padded', () => {
     assert.equal(localStamp(new Date(2026, 0, 5, 9, 7)), '2026-01-05 09:07');
+  });
+});
+
+describe('finaliseInterrupted', () => {
+  const TRANSCRIPT = '/results/nightly/2026-01-05-213045.md';
+  const REASON = 'Interrupted — VS Code closed during execution.';
+
+  /** Records what was done rather than doing it, so failures can be injected. */
+  const spyOps = (overrides: Partial<FinaliseOps> = {}) => {
+    const appended: string[] = [];
+    const renames: Array<[string, string]> = [];
+    const warnings: string[] = [];
+    const ops: FinaliseOps = {
+      exists: () => true,
+      append: (_p, text) => void appended.push(text),
+      rename: (from, to) => void renames.push([from, to]),
+      warn: (message) => void warnings.push(message),
+      ...overrides
+    };
+    return { ops, appended, renames, warnings };
+  };
+
+  it('should_do_nothing_when_the_run_never_had_a_transcript', () => {
+    // A results folder that could not be written to leaves resultPath undefined.
+    const { ops, appended, renames } = spyOps();
+
+    assert.equal(finaliseInterrupted(undefined, REASON, 1000, ops), undefined);
+    assert.deepEqual(appended, []);
+    assert.deepEqual(renames, []);
+  });
+
+  it('should_leave_a_transcript_alone_when_the_file_is_already_gone', () => {
+    const { ops, appended, renames } = spyOps({ exists: () => false });
+
+    assert.equal(finaliseInterrupted(TRANSCRIPT, REASON, 1000, ops), TRANSCRIPT);
+    assert.deepEqual(appended, []);
+    assert.deepEqual(renames, []);
+  });
+
+  it('should_append_a_footer_then_rename_the_transcript_to_failed', () => {
+    const { ops, appended, renames } = spyOps();
+
+    const result = finaliseInterrupted(TRANSCRIPT, REASON, 90_000, ops);
+
+    assert.equal(appended.length, 1);
+    assert.equal(renames.length, 1);
+    assert.equal(renames[0][0], TRANSCRIPT);
+    assert.match(renames[0][1], /-failed\.md$/);
+    assert.equal(result, renames[0][1]);
+  });
+
+  it('should_record_the_reason_and_the_duration_in_the_footer', () => {
+    const { ops, appended } = spyOps();
+
+    finaliseInterrupted(TRANSCRIPT, REASON, 90_000, ops);
+
+    assert.ok(appended[0].includes('**Failed**'));
+    assert.ok(appended[0].includes(REASON));
+    assert.ok(appended[0].includes('1m 30s'));
+  });
+
+  it('should_keep_the_original_path_when_the_rename_fails', () => {
+    // A locked or read-only results folder must not lose the transcript that
+    // was just written, nor take the scheduler down on startup.
+    const { ops, warnings } = spyOps({
+      rename: () => {
+        throw new Error('EPERM');
+      }
+    });
+
+    assert.equal(finaliseInterrupted(TRANSCRIPT, REASON, 1000, ops), TRANSCRIPT);
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0], /EPERM/);
+  });
+
+  it('should_not_attempt_a_rename_when_the_footer_could_not_be_written', () => {
+    // Renaming to `-failed` after a failed append would advertise a finalised
+    // transcript that has no Outcome section in it.
+    const { ops, renames, warnings } = spyOps({
+      append: () => {
+        throw new Error('ENOSPC');
+      }
+    });
+
+    assert.equal(finaliseInterrupted(TRANSCRIPT, REASON, 1000, ops), TRANSCRIPT);
+    assert.deepEqual(renames, []);
+    assert.equal(warnings.length, 1);
   });
 });

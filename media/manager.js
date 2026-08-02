@@ -106,6 +106,87 @@
   const repeatOf = (s) =>
     !s.recurrence ? 'once' : s.recurrence.daysOfWeek.length === 7 ? 'daily' : 'weekly';
 
+  const isRunning = (s) =>
+    !!s && state.runs.some((r) => r.seriesId === s.id && r.status === 'running');
+
+  // ---------- the time axis ----------
+
+  /** Circumference of the ring's r=16 circle, in user units. */
+  const RING_C = 100.53;
+
+  /**
+   * How long the current interval is, so the ring knows what fraction of it has
+   * elapsed. A one-shot has no interval — there is nothing to be a fraction of.
+   */
+  function intervalMs(s) {
+    if (!s || !s.recurrence) return null;
+    const days = s.recurrence.daysOfWeek;
+    if (!days.length) return null;
+    if (days.length === 7) return 86400000;
+
+    // Weekly: the gap back to whichever scheduled day precedes the next run.
+    const next = new Date(s.nextRunAt).getDay();
+    const earlier = days.filter((d) => d !== next);
+    if (!earlier.length) return 7 * 86400000;
+    return Math.min(...earlier.map((d) => (next - d + 7) % 7)) * 86400000;
+  }
+
+  /** Dash offset for a full circumference dasharray: full ring at 0% elapsed. */
+  function ringOffset(iso, interval) {
+    const left = new Date(iso).getTime() - Date.now();
+    const done = Math.min(1, Math.max(0, (interval - left) / interval));
+    return (RING_C * (1 - done)).toFixed(2);
+  }
+
+  const countdownText = (iso) => {
+    const left = new Date(iso).getTime() - Date.now();
+    return left > 0 ? `in ${formatDuration(left)}` : 'due now';
+  };
+
+  function cadenceOf(s) {
+    const time = localTimeOf(s.nextRunAt);
+    const repeat = repeatOf(s);
+    if (repeat === 'daily') return `daily ${time}`;
+    if (repeat === 'weekly') {
+      return `${s.recurrence.daysOfWeek.map((d) => DAY_NAMES[d]).join(' ')} ${time}`;
+    }
+    return `once · ${formatWhen(s.nextRunAt)}`;
+  }
+
+  /** The one line that answers "when does this run next?". */
+  function headStatus(s) {
+    if (!s) return '<p class="head-status">Not scheduled</p>';
+    if (s.spent) return '<p class="head-status">Ran once</p>';
+    if (!s.enabled) return '<p class="head-status">Paused</p>';
+    if (isRunning(s)) return '<p class="head-status"><span class="head-count">running now</span></p>';
+    return `<p class="head-status">
+      <span class="head-count" data-countdown="${esc(s.nextRunAt)}">${esc(countdownText(s.nextRunAt))}</span>
+      &middot; ${esc(cadenceOf(s))}
+    </p>`;
+  }
+
+  /**
+   * Future time, cyclical. The arc fills as the current interval elapses. A live
+   * run replaces it with a sweep; a one-shot gets an outline and no arc, which is
+   * honest rather than inventing a progress figure.
+   */
+  function ringMarkup(s) {
+    const track = '<circle class="ring-track" cx="20" cy="20" r="16" />';
+    const interval = intervalMs(s);
+    const live = s && s.enabled && !s.spent;
+
+    let inner = '';
+    if (isRunning(s)) {
+      inner = '<circle class="ring-sweep" cx="20" cy="20" r="16" />';
+    } else if (live && interval) {
+      inner = `<circle class="ring-arc" cx="20" cy="20" r="16"
+        data-ring-next="${esc(s.nextRunAt)}" data-ring-interval="${interval}"
+        stroke-dasharray="${RING_C}" stroke-dashoffset="${ringOffset(s.nextRunAt, interval)}" />`;
+    }
+
+    return `<svg class="ring" viewBox="0 0 40 40" aria-hidden="true">${track}${inner}</svg>`;
+  }
+
   // ---------- render ----------
 
   /**
@@ -157,7 +238,7 @@
       setupEl.hidden = true;
     }
 
-    startElapsedTicker();
+    startTicker();
     vscode.setState({ selected });
   }
 
@@ -197,7 +278,13 @@
         ? `Edited ${formatAge(plan.modifiedMs)}`
         : 'Not scheduled';
 
-    return `<button class="plan-item ${plan.name === selected ? 'is-selected' : ''}" type="button"
+    const classes = [
+      'plan-item',
+      plan.name === selected ? 'is-selected' : '',
+      isRunning(series) ? 'is-running' : ''
+    ].join(' ');
+
+    return `<button class="${classes}" type="button"
       data-action="select" data-name="${esc(plan.name)}" data-focus-key="plan-${esc(plan.name)}">
       <span class="plan-name">${esc(plan.title)}</span>
       <span class="plan-meta">${esc(meta)}</span>
@@ -213,17 +300,25 @@
       return;
     }
 
+    // Write the plan, decide when it runs, read what happened — then the rare
+    // and destructive management actions, last.
     const series = seriesForPlan(plan);
     detailEl.innerHTML = `
       <div class="detail-head">
-        <h2 class="detail-title">${esc(plan.title)}</h2>
-        ${plan.external ? '<span class="badge">External</span>' : ''}
+        ${ringMarkup(series)}
+        <div class="head-text">
+          <div class="head-title-row">
+            <h2 class="detail-title">${esc(plan.title)}</h2>
+            ${plan.external ? '<span class="badge">External</span>' : ''}
+          </div>
+          ${headStatus(series)}
+          <p class="detail-path">${esc(plan.filePath)}</p>
+        </div>
       </div>
-      <p class="detail-path">${esc(plan.filePath)}</p>
-      ${planActions(plan)}
+      ${editorSection()}
       ${series ? scheduleSection(series) : unscheduledSection(plan)}
-      ${editorSection(plan)}
       ${series ? runsSection(series) : ''}
+      ${manageSection(plan)}
     `;
 
     mountEditor(plan);
@@ -243,16 +338,16 @@
     </div>`;
   }
 
-  function planActions(plan) {
-    return `<div class="actions">
-      <button class="button is-quiet" type="button" data-action="open-editor">Open in editor</button>
-      ${
-        plan.external
-          ? ''
-          : `<button class="button is-quiet" type="button" data-action="rename">Rename</button>
-             <button class="button is-quiet" type="button" data-action="duplicate">Duplicate</button>
-             <button class="button is-quiet is-danger" type="button" data-action="delete">Delete</button>`
-      }
+  /** Rare, and one of them is destructive — so it sits at the bottom. */
+  function manageSection(plan) {
+    if (plan.external) return '';
+    return `<div class="section">
+      <h3 class="section-title">Manage plan</h3>
+      <div class="actions">
+        <button class="button is-quiet" type="button" data-action="rename">Rename</button>
+        <button class="button is-quiet" type="button" data-action="duplicate">Duplicate</button>
+        <button class="button is-quiet is-danger" type="button" data-action="delete">Delete</button>
+      </div>
     </div>`;
   }
 
@@ -277,10 +372,9 @@
           ).join('')}</div>`
         : '';
 
-    const status = s.spent ? 'Ran once' : s.enabled ? formatWhen(s.nextRunAt) : 'Paused';
-
+    // The status used to live in this heading; it is the head's job now.
     return `<div class="section">
-      <h3 class="section-title">Schedule &middot; ${esc(status)}</h3>
+      <h3 class="section-title">Schedule</h3>
       <div class="grid">
         <label class="field">
           <span class="field-label">When</span>
@@ -333,9 +427,12 @@
     </div>`;
   }
 
-  function editorSection(plan) {
+  function editorSection() {
     return `<div class="section">
-      <h3 class="section-title">Plan text</h3>
+      <div class="section-head">
+        <h3 class="section-title">Plan text</h3>
+        <button class="link-button" type="button" data-action="open-editor">Open in editor ↗</button>
+      </div>
       <textarea class="editor" data-field="editor" data-focus-key="editor"
         spellcheck="false" aria-label="Plan text"></textarea>
       <p class="editor-status" data-role="editor-status"></p>
@@ -355,8 +452,18 @@
 
     return `<div class="section">
       <h3 class="section-title">Runs</h3>
-      ${runs.map((r) => runRow(r, s)).join('')}
+      <div class="runs">${runs.map((r) => runRow(r, s)).join('')}</div>
     </div>`;
+  }
+
+  /** The spine dot carries the same verdict as the badges, so the rail scans. */
+  function dotClass(run) {
+    if (run.status === 'running') return 'is-running';
+    if (run.status === 'pending') return 'is-queued';
+    if (run.status === 'failed' || run.status === 'missed' || run.authFailure || run.denials) {
+      return 'is-bad';
+    }
+    return run.status === 'completed' ? 'is-ok' : '';
   }
 
   function runRow(run, series) {
@@ -365,7 +472,7 @@
     if (run.status === 'failed') badges.push('<span class="badge is-bad">failed</span>');
     if (run.status === 'missed') badges.push('<span class="badge is-bad">missed</span>');
     if (run.status === 'cancelled') badges.push('<span class="badge">cancelled</span>');
-    if (run.status === 'pending') badges.push('<span class="badge">queued</span>');
+    if (run.status === 'pending') badges.push('<span class="badge is-queued">queued</span>');
     if (run.authFailure) badges.push('<span class="badge is-bad">auth required</span>');
     if (run.attempt > 1) badges.push(`<span class="badge">retry ${run.attempt - 1}</span>`);
     if (run.denials) badges.push(`<span class="badge is-bad">⚠ ${run.denials} denied</span>`);
@@ -373,7 +480,7 @@
 
     const when =
       run.status === 'running' && run.startedAt
-        ? `<span class="pulse"></span>running <span data-started="${run.startedAt}">0m 00s</span>`
+        ? `running <span data-started="${run.startedAt}">0m 00s</span>`
         : formatWhen(run.scheduledAt);
 
     const actions = [];
@@ -410,6 +517,7 @@
     const result = run.result ? `<p class="run-result">${esc(run.result)}</p>` : '';
 
     return `<div class="run">
+      <span class="run-dot ${dotClass(run)}"></span>
       <div class="run-line">
         <span class="run-when">${when}</span>
         ${badges.join('')}
@@ -475,14 +583,29 @@
     paintEditorStatus();
   }
 
-  function startElapsedTicker() {
+  /** Drives everything on screen that moves with the clock: the elapsed timer of
+   *  a live run, the head countdown, and the ring's arc. */
+  function startTicker() {
     clearInterval(elapsedTimer);
-    if (!state.runs.some((r) => r.status === 'running')) return;
+    if (!detailEl.querySelector('[data-started], [data-countdown], [data-ring-next]')) return;
+
     const tick = () => {
       detailEl.querySelectorAll('[data-started]').forEach((el) => {
         el.textContent = formatDuration(Date.now() - new Date(el.dataset.started).getTime());
       });
+      detailEl.querySelectorAll('[data-countdown]').forEach((el) => {
+        el.textContent = countdownText(el.dataset.countdown);
+      });
+      // CSP forbids inline styles, so the ring moves via its SVG presentation
+      // attribute rather than el.style.
+      detailEl.querySelectorAll('[data-ring-next]').forEach((el) => {
+        el.setAttribute(
+          'stroke-dashoffset',
+          ringOffset(el.dataset.ringNext, Number(el.dataset.ringInterval))
+        );
+      });
     };
+
     tick();
     elapsedTimer = setInterval(tick, 1000);
   }

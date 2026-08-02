@@ -417,19 +417,11 @@ export class Manager implements vscode.Disposable {
     }
   }
 
-  /**
-   * Whether an absolute path is one of the external plans Chronus is scheduled
-   * to run.
-   *
-   * External plans bypass `resolveInLibrary` deliberately — that guard governs
-   * name-derived paths, and an absolute path the user explicitly scheduled is
-   * already trusted at a higher level, since the runner reads and executes it.
-   * That reasoning only holds for paths actually *in* the schedule, so this is
-   * the check that makes it true. Without it, `savePlan` would write arbitrary
-   * text to any path the webview named.
-   */
   private isScheduledPlan(filePath: string): boolean {
-    return this.store.getSeries().some((s) => samePath(s.filePath, filePath));
+    return library.isScheduledPlan(
+      this.store.getSeries().map((s) => s.filePath),
+      filePath
+    );
   }
 
   private refuseExternal(filePath: string): void {
@@ -443,7 +435,9 @@ export class Manager implements vscode.Disposable {
    */
   private async deletePlan(dir: string, name: string): Promise<void> {
     const filePath = path.join(dir, name);
-    const scheduled = this.store.getSeries().filter((s) => samePath(s.filePath, filePath));
+    const scheduled = this.store
+      .getSeries()
+      .filter((s) => library.samePath(s.filePath, filePath));
 
     if (scheduled.length > 0) {
       const choice = await vscode.window.showWarningMessage(
@@ -469,7 +463,7 @@ export class Manager implements vscode.Disposable {
   /** A renamed plan must not strand the series pointing at its old path. */
   private async repointSeries(before: string, after: string, fileName: string): Promise<void> {
     for (const series of this.store.getSeries()) {
-      if (samePath(series.filePath, before)) {
+      if (library.samePath(series.filePath, before)) {
         await this.store.updateSeries(series.id, { filePath: after, fileName });
       }
     }
@@ -559,11 +553,6 @@ function askForTitle(prompt: string, value: string): Thenable<string | undefined
     validateInput: (input) =>
       input.trim() ? undefined : 'Give the plan a name.'
   });
-}
-
-/** Windows paths differ in case and separator without differing in meaning. */
-function samePath(a: string, b: string): boolean {
-  return path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase();
 }
 
 function dedupeByPath<T extends { filePath: string }>(items: T[]): T[] {

@@ -7,6 +7,102 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+A visual redesign of the manager, which has been the extension's only UI since
+the sidebar was removed. It was a flat stack of identically weighted sections, so
+nothing answered *when does this run next?* at a glance and the run history — the
+record of what the agent did overnight — sat below a 260px textarea, usually off
+screen. Nothing outside `media/` changed: no logic, no message types, no storage.
+
+Also in this release: test coverage for three of the 0.8.0-rc.3 audit fixes that
+shipped without any, because they lived in modules that import `vscode` and
+cannot load in the plain Node test runner. Closing the gaps meant moving the
+logic out; one of the moves also narrowed a guard.
+
+### Fixed
+
+- **The external-plan guard no longer folds case on filesystems that don't.**
+  The check deciding whether the manager may write to an absolute path compared
+  paths lowercased on every platform. On Linux `Plan.md` and `plan.md` are two
+  different files, so the guard was wider than intended there and would have
+  permitted a write to a file the caller never named. Case is now folded only on
+  Windows. No change to Windows behaviour.
+
+### Changed
+
+- **The detail pane follows the authoring flow: write the plan, decide when it
+  runs, read what happened.** Plan text is first, schedule second, runs third.
+  Rename, Duplicate and Delete move to the bottom under a **Manage plan** heading
+  — they are rare and one is destructive, but they sat directly under the title
+  competing with the schedule. `Open in editor` moves inline beside the *Plan
+  text* label, where the affordance belongs. The editor's default height drops
+  from 260px to 180px so the schedule and runs stay reachable without scrolling;
+  it is still resizable.
+- **The head is now the hero, and it carries the countdown.** A plan's next run
+  used to hide inside the *Schedule* section heading, set in the same font as
+  everything else. It is now a large amber countdown beside the title
+  (`in 6h 12m · daily 21:30`), with the file path demoted to a quiet third line.
+- **One owned colour.** The shell still derives every background, border and
+  focus ring from `--vscode-*`, so the manager belongs to whatever theme you run.
+  Chronus owns a single amber — sodium — and spends it only on liveness and
+  imminence: the countdown, the ring, the queued badge, and a left edge on a plan
+  that is running right now. Focus rings stay `--vscode-focusBorder`; splitting
+  focus from status is what stops one accent becoming decoration. Light themes
+  get a darker sodium, and **high-contrast themes fall back to the focus colour**
+  rather than having amber painted over an accessibility theme.
+- **Run badges read as a traffic light.** A completed run used to wear a *blue*
+  outline borrowed from the focus colour, which is not a verdict. Completed is
+  now green, queued is sodium, and failed / missed / auth required / denied stay
+  red. Cost, `retry N` and cancellation stay neutral grey — they are facts, not
+  verdicts, and colouring them would dilute the three that matter.
+- **Two typefaces, one rule.** Prose — titles, buttons, notices — is set in the
+  UI font; every measurement — time, duration, cost, badge, path, section label —
+  is set in the editor font with `tabular-nums`, so costs and durations align
+  into a column down the runs list. No web font is bundled: a display face would
+  fight every theme and inflate the `.vsix` for nothing.
+- **A time axis, in two expressions.** A countdown ring in the head fills as the
+  current interval elapses toward the next run — a weekly plan uses its own
+  interval, and a one-shot shows an outline with no arc rather than inventing a
+  progress figure. The runs list gains a vertical rail with one dot per run,
+  replacing the flat bordered rows; the dot carries the same three-state colour
+  as the badges. Circles are occurrences, the rail is elapsed time, and nothing
+  else in the UI uses the motif.
+- The elapsed-run ticker generalises to drive the countdown text and the ring's
+  arc as well. The arc is written with `setAttribute('stroke-dashoffset', …)` —
+  an SVG presentation attribute — because the webview's CSP allows no inline
+  styles. Reduced motion disables the ring sweep and the running dot's halo while
+  leaving the arc rendered.
+- The drop overlay reads *Drop a .md file to schedule it*; the common case is one
+  file and the active voice matches the rest of the UI.
+
+- `samePath` and the scheduled-plan check moved from `manager.ts` to
+  `library.ts`, which already owns the library's traversal guard and has no
+  `vscode` import. A duplicated copy of `samePath` went with the move.
+- `finaliseInterrupted` moved from `runner.ts` to `transcript.ts`, taking its
+  filesystem and logging as injected operations in the manner of
+  `preflightError`. `runner.ts` keeps a one-line wrapper supplying the real
+  `fs`; `Scheduler.reconcile` is unchanged. The cases worth testing here are the
+  ones where the disk refuses — a rename or an append that throws must return the
+  original path and must not take the scheduler down at startup — and those are
+  awkward to force against a real directory.
+- New `test/source-guards.test.ts` fails the build if `Math.random(` reappears
+  anywhere in `src/`. The CSP nonce's only worthwhile property is that it cannot
+  be guessed, which no assertion on a returned string can demonstrate; a test
+  that two nonces differ would pass for a counter. Reading the source is the
+  check that would actually have caught the original defect.
+- `docs/TEST-PLAN.md` gains step 7.8, confirming by eye that the nonce reaches
+  the document and changes between opens — the half of the fix no test reaches.
+- The manual test plan's numbered sections are **steps** rather than *gates*,
+  and each one's table column is **Check** rather than *Step* — the old naming
+  had a "Step 1" containing fourteen "steps". Sprint exit criteria in the
+  planning documents keep the word *Gate*, as do the concurrency and permission
+  gates in the source; those are different things.
+
+### Removed
+
+- `.badge.is-repeat` — dead CSS, nothing ever emitted the class.
+- Status dots on library list items, which were redundant: each item already
+  prints its next run in text.
+
 ## [0.8.0-rc.3] - 2026-08-02
 
 A full audit of the codebase, and the ten defects it found. Two of them could
@@ -131,7 +227,7 @@ first porting everything the sidebar could do that the manager could not.
   Chronus does and the two ways to add a plan.
 - Tests: **160, up from 157** — covering the absolute-path plan helpers.
 - Docs: README rewritten from "two views" to the single manager; `TEST-PLAN.md`
-  folds Gate 8b into one manager gate and adds drop-zone and missed-action cases.
+  folds Step 8b into one manager step and adds drop-zone and missed-action cases.
 
 ## [0.7.0-rc.1] - 2026-07-26
 
@@ -186,7 +282,7 @@ you get back from it.
   silently deleting a record of unattended work is the wrong default.
 - `bypassPermissions` is paired with `--allow-dangerously-skip-permissions`,
   which the CLI documents as making the bypass *available* rather than active.
-  That pairing is still unverified end to end — `docs/TEST-PLAN.md` Gate 2.
+  That pairing is still unverified end to end — `docs/TEST-PLAN.md` Step 2.
 
 ## [0.6.0-rc.4] - 2026-07-26
 
@@ -238,7 +334,7 @@ you get back from it.
 ## [0.6.0-rc.1] - 2026-07-26
 
 The plan manager. Still a candidate: the manager's own UI has not been driven by
-hand, and the 0.5.0 gates in `docs/TEST-PLAN.md` remain outstanding. What *is*
+hand, and the 0.5.0 steps in `docs/TEST-PLAN.md` remain outstanding. What *is*
 confirmed is that the execution engine works — a real run completed on
 2026-07-26 (2 turns, $0.26, no permission denials), which was the one genuinely
 unproven layer.
@@ -338,7 +434,7 @@ manual gates in `docs/COMPLETION-PLAN.md` Sprints 8 and 12 promote this to
 
 ### Added — developer tooling
 
-- `docs/TEST-PLAN.md` — the ten manual gates that unit tests structurally cannot
+- `docs/TEST-PLAN.md` — the ten manual steps that unit tests structurally cannot
   reach: process spawning, drag-and-drop, real editor restarts, theme rendering.
 - `.sandbox/` — a throwaway working directory the Extension Development Host
   opens at launch, so smoke runs have somewhere safe to write.

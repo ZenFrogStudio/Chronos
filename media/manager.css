@@ -1,14 +1,29 @@
-/* Chronus manager. Palette from VS Code theme vars so it adapts to any theme.
-   Global values only — no component tokens. */
+/* Chronus manager. The shell is derived from VS Code theme vars so it adapts to
+   any theme. Chronus owns one colour — sodium — spent only on liveness and
+   imminence. Global values only — no component tokens. */
 
 :root {
   --border: var(--vscode-widget-border, color-mix(in srgb, var(--vscode-foreground) 18%, transparent));
   --accent: var(--vscode-focusBorder);
+  --sodium: #E0A458;
+  --ok: var(--vscode-charts-green, #3FB950);
   --muted: var(--vscode-descriptionForeground);
   --danger: var(--vscode-errorForeground);
   --raised: color-mix(in srgb, var(--vscode-foreground) 4%, transparent);
   --glass-bg: color-mix(in srgb, var(--vscode-sideBar-background) 78%, transparent);
   --radius: 6px;
+}
+
+/* Amber and green both need darkening to stay legible on a light background. */
+body.vscode-light {
+  --sodium: #9A5B0F;
+  --ok: #1A7F37;
+}
+
+/* Never paint a brand colour over an accessibility theme. Covers light HC too,
+   which carries both vscode-high-contrast and vscode-high-contrast-light. */
+body.vscode-high-contrast {
+  --sodium: var(--vscode-focusBorder);
 }
 
 * {
@@ -24,6 +39,24 @@ body {
   background: var(--vscode-editor-background);
   font-family: var(--vscode-font-family);
   font-size: var(--vscode-font-size);
+}
+
+/* The two-typeface rule: prose is set in the UI font, every measurement — time,
+   duration, cost, path, label — is set in the editor font. If it is data, it is
+   in the code font. */
+.plan-group,
+.library-title,
+.section-title,
+.field-label,
+.plan-meta,
+.detail-path,
+.path-value,
+.head-status,
+.run-when,
+.badge,
+.statusline {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-variant-numeric: tabular-nums;
 }
 
 .notice {
@@ -96,9 +129,9 @@ body.dragging .drop-overlay {
 
 .library-title {
   margin: 0 0 8px;
-  font-size: 0.78em;
+  font-size: 0.7em;
   font-weight: 600;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--muted);
 }
@@ -136,9 +169,9 @@ body.dragging .drop-overlay {
 .plan-group {
   margin: 6px 0 2px;
   padding: 0 6px;
-  font-size: 0.72em;
+  font-size: 0.7em;
   font-weight: 600;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--muted);
 }
@@ -167,6 +200,13 @@ body.dragging .drop-overlay {
   color: var(--vscode-list-activeSelectionForeground);
 }
 
+/* The one status marker left in the list: a plan running right now, visible
+   while you are looking at a different plan. Inset rather than a border so the
+   row does not shift. */
+.plan-item.is-running {
+  box-shadow: inset 2px 0 0 var(--sodium);
+}
+
 .plan-name {
   display: block;
   overflow: hidden;
@@ -177,7 +217,7 @@ body.dragging .drop-overlay {
 .plan-meta {
   display: block;
   margin-top: 2px;
-  font-size: 0.8em;
+  font-size: 0.82em;
   color: var(--muted);
 }
 
@@ -195,7 +235,7 @@ body.dragging .drop-overlay {
   border-top: 1px solid var(--border);
 }
 
-/* --- Detail pane --- */
+/* --- Detail head --- */
 
 .detail {
   min-height: 0;
@@ -206,22 +246,89 @@ body.dragging .drop-overlay {
 .detail-head {
   display: flex;
   align-items: center;
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.head-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.head-title-row {
+  display: flex;
+  align-items: center;
   gap: 8px;
-  margin-bottom: 4px;
 }
 
 .detail-title {
   margin: 0;
-  font-size: 1.15em;
+  font-size: 1.3em;
   font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.head-status {
+  margin: 2px 0 0;
+  font-size: 0.82em;
+  color: var(--muted);
+}
+
+.head-count {
+  font-size: 1.55em;
+  color: var(--sodium);
 }
 
 .detail-path {
-  margin: 0 0 16px;
-  font-size: 0.85em;
+  margin: 3px 0 0;
+  font-size: 0.78em;
   color: var(--muted);
   overflow-wrap: anywhere;
 }
+
+/* --- Countdown ring: future time, cyclical --- */
+
+.ring {
+  flex: none;
+  width: 40px;
+  height: 40px;
+}
+
+.ring-track,
+.ring-arc,
+.ring-sweep {
+  fill: none;
+  stroke-width: 2.5;
+}
+
+.ring-track {
+  stroke: var(--border);
+}
+
+.ring-arc {
+  stroke: var(--sodium);
+  stroke-linecap: round;
+  transform: rotate(-90deg);
+  transform-origin: 50% 50%;
+  transition: stroke-dashoffset 900ms linear;
+}
+
+.ring-sweep {
+  stroke: var(--sodium);
+  stroke-linecap: round;
+  stroke-dasharray: 14 87;
+  transform-origin: 50% 50%;
+  animation: sweep 2.4s linear infinite;
+}
+
+@keyframes sweep {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* --- Sections --- */
 
 .section {
   margin-bottom: 20px;
@@ -229,13 +336,25 @@ body.dragging .drop-overlay {
   border-top: 1px solid var(--border);
 }
 
+.section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
 .section-title {
   margin: 0 0 10px;
-  font-size: 0.75em;
+  font-size: 0.7em;
   font-weight: 600;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--muted);
+}
+
+.section-head .section-title {
+  margin: 0;
 }
 
 .grid {
@@ -251,7 +370,7 @@ body.dragging .drop-overlay {
 }
 
 .field-label {
-  font-size: 0.8em;
+  font-size: 0.82em;
   color: var(--muted);
 }
 
@@ -282,6 +401,7 @@ select.field-input {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   color: var(--muted);
+  font-size: 0.82em;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -291,7 +411,7 @@ select.field-input {
 
 .editor {
   width: 100%;
-  min-height: 260px;
+  min-height: 180px;
   padding: 10px 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -306,7 +426,7 @@ select.field-input {
 
 .editor-status {
   margin-top: 6px;
-  font-size: 0.8em;
+  font-size: 0.82em;
   color: var(--muted);
 }
 
@@ -371,16 +491,61 @@ select.field-input {
   margin-top: 10px;
 }
 
-/* --- Runs --- */
+/* --- Runs: past time, linear. One rail, one dot per occurrence. --- */
+
+.runs {
+  position: relative;
+  padding-left: 18px;
+}
+
+.runs::before {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 10px;
+  bottom: 10px;
+  width: 1px;
+  background: var(--border);
+}
 
 .run {
+  position: relative;
   padding: 6px 0;
-  border-bottom: 1px solid var(--border);
   font-size: 0.9em;
 }
 
-.run:last-child {
-  border-bottom: none;
+.run-dot {
+  position: absolute;
+  left: -18px;
+  top: 9px;
+  width: 9px;
+  height: 9px;
+  border: 1.5px solid var(--muted);
+  border-radius: 50%;
+  background: var(--vscode-editor-background);
+}
+
+.run-dot.is-ok { border-color: var(--ok); }
+.run-dot.is-bad { border-color: var(--danger); }
+.run-dot.is-queued { border-color: var(--sodium); }
+
+.run-dot.is-running {
+  border-color: var(--sodium);
+  background: var(--sodium);
+}
+
+.run-dot.is-running::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border: 1px solid var(--sodium);
+  border-radius: 50%;
+  animation: halo 1.6s ease-in-out infinite;
+}
+
+@keyframes halo {
+  0%, 100% { opacity: 0.7; transform: scale(1); }
+  50% { opacity: 0; transform: scale(1.4); }
 }
 
 .run-line {
@@ -403,6 +568,8 @@ select.field-input {
   overflow-wrap: anywhere;
 }
 
+/* Outcome badges read as a traffic light. Cost, retries and cancellation stay
+   neutral — they are facts, not verdicts. */
 .badge {
   padding: 1px 6px;
   border: 1px solid var(--border);
@@ -412,27 +579,14 @@ select.field-input {
   white-space: nowrap;
 }
 
-.badge.is-ok { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+.badge.is-ok { border-color: var(--ok); color: var(--ok); }
+.badge.is-queued { border-color: var(--sodium); color: var(--sodium); }
 .badge.is-bad { border-color: var(--danger); color: var(--danger); }
-.badge.is-repeat { color: var(--vscode-foreground); }
-
-.pulse {
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  margin-right: 5px;
-  border-radius: 50%;
-  background: var(--accent);
-  animation: pulse 1.4s ease-in-out infinite;
-}
-
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.25; }
-}
 
 @media (prefers-reduced-motion: reduce) {
-  .pulse { animation: none; }
+  .ring-arc { transition: none; }
+  .ring-sweep,
+  .run-dot.is-running::after { animation: none; }
 }
 
 .days {
@@ -529,5 +683,14 @@ select.field-input {
     border-right: none;
     border-bottom: 1px solid var(--border);
     max-height: 40vh;
+  }
+
+  .grid {
+    grid-template-columns: 1fr;
+  }
+
+  .ring {
+    width: 28px;
+    height: 28px;
   }
 }

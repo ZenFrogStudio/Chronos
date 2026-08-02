@@ -1,4 +1,5 @@
 import { Outcome } from './outcome';
+import { withStatus } from './results';
 
 /**
  * Turning the CLI's NDJSON stream into something a person reads. Pure — no
@@ -219,6 +220,50 @@ export function transcriptFooter(outcome: Outcome, durationMs: number): string {
   }
 
   return lines.join('\n');
+}
+
+/** The filesystem and logging a transcript needs to be closed out. Injected so
+ *  the failure paths below — which are the ones worth testing — can be forced. */
+export interface FinaliseOps {
+  exists: (filePath: string) => boolean;
+  append: (filePath: string, text: string) => void;
+  rename: (from: string, to: string) => void;
+  warn: (message: string) => void;
+}
+
+/**
+ * Closes out a transcript abandoned by a window that died mid-run, returning
+ * where the transcript now lives.
+ *
+ * The footer and the `-failed` rename normally happen in `Runner.settle`, which
+ * a killed extension host never reaches. Left alone, those transcripts keep
+ * their un-suffixed name — so the results folder stops answering "which nights
+ * went wrong" for precisely the runs that went most wrong. Called from
+ * `Scheduler.reconcile()` on the next launch, where there is time to do it.
+ *
+ * Never throws. This runs while reconciling orphans at startup, and a results
+ * folder that has gone read-only must not stop the scheduler from coming up.
+ */
+export function finaliseInterrupted(
+  resultPath: string | undefined,
+  error: string,
+  durationMs: number,
+  ops: FinaliseOps
+): string | undefined {
+  if (!resultPath || !ops.exists(resultPath)) {
+    return resultPath;
+  }
+
+  try {
+    const outcome: Outcome = { ok: false, error, denials: 0, retryable: true };
+    ops.append(resultPath, transcriptFooter(outcome, durationMs));
+    const target = withStatus(resultPath, 'failed');
+    ops.rename(resultPath, target);
+    return target;
+  } catch (err) {
+    ops.warn(`could not finalise an interrupted transcript: ${String(err)}`);
+    return resultPath;
+  }
 }
 
 // ---------- helpers ----------

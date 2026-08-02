@@ -8,11 +8,13 @@ import {
   duplicatePlan,
   ensureLibrary,
   isInside,
+  isScheduledPlan,
   listPlans,
   readPlan,
   readPlanAt,
   removePlan,
   renamePlan,
+  samePath,
   seedLibrary,
   toPlanFileName,
   uniqueName,
@@ -98,6 +100,89 @@ describe('isInside', () => {
 
   it('should_reject_a_sibling_with_a_shared_prefix', () => {
     assert.equal(isInside('/library', '/library-other/plan.md'), false);
+  });
+});
+
+describe('samePath', () => {
+  it('should_match_a_path_against_itself', () => {
+    assert.equal(samePath('/plans/nightly.md', '/plans/nightly.md'), true);
+  });
+
+  it('should_see_through_traversal_segments_to_the_same_file', () => {
+    // Resolution happens before comparison, so `..` cannot smuggle a path past
+    // a caller that already checked the plain form.
+    assert.equal(samePath('/plans/sub/../nightly.md', '/plans/nightly.md'), true);
+  });
+
+  it('should_fold_case_when_told_the_filesystem_does', () => {
+    assert.equal(samePath('/plans/Nightly.md', '/plans/nightly.md', true), true);
+  });
+
+  it('should_keep_case_significant_when_the_filesystem_does', () => {
+    // On Linux these are two different files. Folding them would let a caller
+    // write to a file it never named.
+    assert.equal(samePath('/plans/Nightly.md', '/plans/nightly.md', false), false);
+  });
+
+  it('should_reject_a_different_file_in_the_same_folder', () => {
+    assert.equal(samePath('/plans/nightly.md', '/plans/weekly.md'), false);
+  });
+
+  it('should_reject_the_same_basename_in_a_different_folder', () => {
+    assert.equal(samePath('/plans/nightly.md', '/other/nightly.md'), false);
+  });
+
+  it('should_reject_a_name_that_merely_starts_with_the_scheduled_one', () => {
+    assert.equal(samePath('/plans/nightly.md', '/plans/nightly.md.bak'), false);
+  });
+
+  // Separator equivalence is a Windows filesystem property. On Linux a
+  // backslash is an ordinary character in a filename, and pretending otherwise
+  // would widen the guard on exactly the platform that needs it narrow.
+  it(
+    'should_treat_mixed_separators_as_one_path_on_windows',
+    { skip: process.platform !== 'win32' },
+    () => {
+      assert.equal(samePath('/plans/nightly.md', '\\plans\\nightly.md'), true);
+    }
+  );
+});
+
+describe('isScheduledPlan', () => {
+  const schedule = ['/plans/nightly.md', '/elsewhere/weekly.md'];
+
+  it('should_allow_a_path_that_is_in_the_schedule', () => {
+    assert.equal(isScheduledPlan(schedule, '/elsewhere/weekly.md'), true);
+  });
+
+  it('should_allow_a_scheduled_path_reached_through_traversal', () => {
+    assert.equal(isScheduledPlan(schedule, '/plans/sub/../nightly.md'), true);
+  });
+
+  it('should_refuse_an_unscheduled_neighbour_of_a_scheduled_plan', () => {
+    // The whole point of the guard: savePlan must not write to a path the
+    // webview named that Chronus was never asked to run.
+    assert.equal(isScheduledPlan(schedule, '/plans/secrets.md'), false);
+  });
+
+  it('should_refuse_a_scheduled_basename_in_an_unscheduled_folder', () => {
+    assert.equal(isScheduledPlan(schedule, '/tmp/nightly.md'), false);
+  });
+
+  it('should_refuse_a_path_that_only_shares_a_prefix', () => {
+    assert.equal(isScheduledPlan(schedule, '/plans/nightly.md.bak'), false);
+  });
+
+  it('should_refuse_everything_when_nothing_is_scheduled', () => {
+    assert.equal(isScheduledPlan([], '/plans/nightly.md'), false);
+  });
+
+  it('should_refuse_a_case_variant_where_case_is_significant', () => {
+    assert.equal(isScheduledPlan(schedule, '/plans/Nightly.md', false), false);
+  });
+
+  it('should_allow_a_case_variant_where_case_is_not', () => {
+    assert.equal(isScheduledPlan(schedule, '/plans/Nightly.md', true), true);
   });
 });
 
