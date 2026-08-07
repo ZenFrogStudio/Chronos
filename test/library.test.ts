@@ -7,26 +7,26 @@ import {
   createPlan,
   duplicatePlan,
   ensureLibrary,
+  importFile,
   isInside,
-  isScheduledPlan,
   listPlans,
   parseUriList,
+  planPath,
   readPlan,
-  readPlanAt,
   removePlan,
   renamePlan,
   samePath,
   seedLibrary,
+  taskLabel,
   toPlanFileName,
   uniqueName,
-  writePlan,
-  writePlanAt
+  writePlan
 } from '../src/library';
 
 let dir: string;
 
 beforeEach(() => {
-  dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chronus-lib-'));
+  dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chronos-lib-'));
 });
 
 afterEach(() => {
@@ -177,41 +177,72 @@ describe('samePath', () => {
   );
 });
 
-describe('isScheduledPlan', () => {
-  const schedule = ['/plans/nightly.md', '/elsewhere/weekly.md'];
-
-  it('should_allow_a_path_that_is_in_the_schedule', () => {
-    assert.equal(isScheduledPlan(schedule, '/elsewhere/weekly.md'), true);
+describe('taskLabel', () => {
+  // How a captured task reads as a single row in the activity-bar inbox. Nothing
+  // here is ever written back — the file is the task, this is only the display.
+  it('should_use_the_first_line_of_the_task', () => {
+    assert.equal(taskLabel('Refactor the auth module\n'), 'Refactor the auth module');
   });
 
-  it('should_allow_a_scheduled_path_reached_through_traversal', () => {
-    assert.equal(isScheduledPlan(schedule, '/plans/sub/../nightly.md'), true);
+  it('should_skip_leading_blank_lines', () => {
+    assert.equal(taskLabel('\n\n  \nWrite release notes\n'), 'Write release notes');
   });
 
-  it('should_refuse_an_unscheduled_neighbour_of_a_scheduled_plan', () => {
-    // The whole point of the guard: savePlan must not write to a path the
-    // webview named that Chronus was never asked to run.
-    assert.equal(isScheduledPlan(schedule, '/plans/secrets.md'), false);
+  it('should_strip_the_marks_that_make_a_heading_or_a_bullet', () => {
+    // A task may be edited in a real editor, where Markdown habits take over.
+    assert.equal(taskLabel('# Add interval repeats'), 'Add interval repeats');
+    assert.equal(taskLabel('- Add interval repeats'), 'Add interval repeats');
+    assert.equal(taskLabel('1. Add interval repeats'), 'Add interval repeats');
   });
 
-  it('should_refuse_a_scheduled_basename_in_an_unscheduled_folder', () => {
-    assert.equal(isScheduledPlan(schedule, '/tmp/nightly.md'), false);
+  it('should_stay_one_line_once_a_task_has_grown', () => {
+    // A task grows past one line after Claude has asked about it; the row cannot.
+    const label = taskLabel('Refactor the auth module\n\nContext: it predates SSO.\n');
+
+    assert.equal(label, 'Refactor the auth module');
   });
 
-  it('should_refuse_a_path_that_only_shares_a_prefix', () => {
-    assert.equal(isScheduledPlan(schedule, '/plans/nightly.md.bak'), false);
+  it('should_clip_a_task_too_long_for_a_row', () => {
+    const label = taskLabel('a'.repeat(500));
+
+    assert.ok(label.length <= 80, 'the sidebar would truncate it a second time');
+    assert.ok(label.endsWith('…'), 'clipping must be visible, not silent');
   });
 
-  it('should_refuse_everything_when_nothing_is_scheduled', () => {
-    assert.equal(isScheduledPlan([], '/plans/nightly.md'), false);
+  it('should_give_an_empty_task_something_readable', () => {
+    // An empty file would otherwise render as an unclickable blank row.
+    assert.equal(taskLabel(''), '(empty task)');
+    assert.equal(taskLabel('\n  \n'), '(empty task)');
+  });
+});
+
+describe('planPath', () => {
+  // A name is the only way the webview may address a plan, and this is the one
+  // place a name becomes a path. Everything that reads, writes, schedules or
+  // opens a plan comes through here, so what it refuses it refuses for all of them.
+  it('should_resolve_a_plain_name_inside_the_library', () => {
+    assert.equal(planPath(dir, 'nightly.md'), path.join(dir, 'nightly.md'));
   });
 
-  it('should_refuse_a_case_variant_where_case_is_significant', () => {
-    assert.equal(isScheduledPlan(schedule, '/plans/Nightly.md', false), false);
+  it('should_flatten_a_traversing_name_back_into_the_library', () => {
+    // Traversal is stripped rather than refused: a name is a label, not an
+    // address, so the directory part is discarded and the result still lands in
+    // the library. What matters is that nothing escapes, not how it is stopped.
+    for (const bad of ['../outside.md', 'sub/../../outside.md', 'sub/nightly.md']) {
+      const resolved = planPath(dir, bad);
+
+      assert.equal(path.dirname(resolved), dir, `${bad} escaped the library`);
+      assert.ok(isInside(dir, resolved));
+    }
   });
 
-  it('should_allow_a_case_variant_where_case_is_not', () => {
-    assert.equal(isScheduledPlan(schedule, '/plans/Nightly.md', true), true);
+  it('should_refuse_a_non_markdown_name', () => {
+    assert.throws(() => planPath(dir, 'config.json'), /outside the plan library/);
+    assert.throws(() => planPath(dir, 'passwd'), /outside the plan library/);
+  });
+
+  it('should_refuse_a_name_that_resolves_to_the_library_itself', () => {
+    assert.throws(() => planPath(dir, ''), /outside the plan library/);
   });
 });
 
@@ -327,44 +358,71 @@ describe('ensureLibrary and seeding', () => {
   });
 });
 
-describe('external plans by absolute path', () => {
-  it('should_round_trip_a_plan_by_absolute_path', () => {
-    const filePath = path.join(dir, 'external.md');
+describe('importFile', () => {
+  // The single door into the library for a file from anywhere else on disk.
+  let outside: string;
 
-    writePlanAt(filePath, '# External\n');
-
-    assert.equal(readPlanAt(filePath), '# External\n');
+  beforeEach(() => {
+    outside = fs.mkdtempSync(path.join(os.tmpdir(), 'chronos-src-'));
   });
 
-  it('should_operate_on_paths_outside_a_library_by_design', () => {
-    // An external plan the user explicitly scheduled lives outside the library.
-    // These helpers address it by its own absolute path; the name-derived guard
-    // does not — and must not — apply, because the runner already executes it.
-    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'chronus-ext-'));
-    const filePath = path.join(outside, 'elsewhere.md');
-
-    try {
-      writePlanAt(filePath, 'body');
-
-      assert.equal(readPlanAt(filePath), 'body');
-      assert.ok(!isInside(dir, filePath), 'the file is genuinely outside the library');
-    } finally {
-      fs.rmSync(outside, { recursive: true, force: true });
-    }
+  afterEach(() => {
+    fs.rmSync(outside, { recursive: true, force: true });
   });
 
-  it('should_not_weaken_the_name_derived_guard', () => {
-    // Adding absolute-path helpers must not let a *name* escape the library:
-    // `writePlan` still routes through `resolveInLibrary`, which strips traversal.
-    const escaped = path.join(dir, '..', 'escaped.md');
+  /** Writes a file outside the library and returns its path. */
+  const source = (name: string, text: string): string => {
+    const filePath = path.join(outside, name);
+    fs.writeFileSync(filePath, text);
+    return filePath;
+  };
 
-    try {
-      writePlan(dir, '../escaped.md', 'pwned');
-    } catch {
-      // Refusing or failing to resolve is fine; escaping the library is not.
-    }
+  it('should_copy_the_contents_under_a_name_derived_from_the_source', () => {
+    const plan = importFile(dir, source('Nightly Deploy.md', '# Deploy\n'));
 
-    assert.equal(fs.existsSync(escaped), false, 'the name-derived guard let a write escape');
+    assert.equal(plan.name, 'nightly-deploy.md');
+    assert.equal(readPlan(dir, plan.name), '# Deploy\n');
+    assert.ok(isInside(dir, plan.filePath), 'the copy must land inside the library');
+  });
+
+  it('should_leave_the_original_where_it_was', () => {
+    // Copy, never move: the user's file is theirs, and Chronos schedules the copy.
+    const sourcePath = source('keep-me.md', 'original');
+
+    importFile(dir, sourcePath);
+
+    assert.equal(fs.existsSync(sourcePath), true);
+    assert.equal(fs.readFileSync(sourcePath, 'utf8'), 'original');
+  });
+
+  it('should_deduplicate_against_a_plan_of_the_same_name', () => {
+    createPlan(dir, 'Nightly');
+
+    const plan = importFile(dir, source('nightly.md', 'from outside'));
+
+    assert.equal(plan.name, 'nightly-2.md');
+    assert.equal(readPlan(dir, 'nightly-2.md'), 'from outside');
+    assert.equal(listPlans(dir).length, 2, 'the existing plan must survive the import');
+  });
+
+  it('should_import_the_same_source_twice_as_two_plans', () => {
+    const sourcePath = source('twice.md', 'body');
+
+    assert.equal(importFile(dir, sourcePath).name, 'twice.md');
+    assert.equal(importFile(dir, sourcePath).name, 'twice-2.md');
+  });
+
+  it('should_create_the_library_when_it_does_not_exist_yet', () => {
+    const fresh = path.join(dir, 'library');
+
+    const plan = importFile(fresh, source('first.md', 'body'));
+
+    assert.equal(readPlan(fresh, plan.name), 'body');
+  });
+
+  it('should_fail_rather_than_create_an_empty_plan_for_a_missing_source', () => {
+    assert.throws(() => importFile(dir, path.join(outside, 'gone.md')), /ENOENT/);
+    assert.deepEqual(listPlans(dir), []);
   });
 });
 

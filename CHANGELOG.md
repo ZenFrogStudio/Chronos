@@ -1,6 +1,7 @@
 # Changelog
 
-All notable changes to Chronus are documented here.
+All notable changes to Chronos are documented here. Entries below predate the
+rename from Chronus and are left as written.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -20,6 +21,114 @@ cannot load in the plain Node test runner. Closing the gaps meant moving the
 logic out; one of the moves also narrowed a guard.
 
 ### Added
+
+- **A task can now run on an engine other than Claude.** The Schedule section
+  gains an **Engine** dropdown beside **Model**, and picking `opencode` runs that
+  plan through the `opencode` CLI instead — which is one binary that routes to
+  Kimi, the GPT family and a local Ollama model through a single interface. That
+  is the whole reason it was chosen over adding one integration per vendor:
+  Chronos gets "other models" without growing a stream parser per provider.
+
+  Claude remains the default and its path is untouched. A series with no engine
+  set *is* a Claude series, which is what every existing schedule already means,
+  so there was no migration and no schema bump.
+
+  The dropdown only lists engines this machine answered `--version` on, checked
+  once at startup by the same probe that already reported a broken `claudePath`.
+  If you have no `opencode` on PATH the field does not appear at all. Claude is
+  the exception: it stays listed even when broken, because a missing default is
+  a setup problem to fix rather than a choice to withdraw.
+
+  What made this small is that `TranscriptEvent` never named a vendor — it is
+  `session | text | tool | result`. Both engines produce that union, so the live
+  terminal, the Markdown transcript, the run cards and the status bar are all
+  unchanged. Only the parse forks.
+
+  Three things worth knowing:
+
+  - **opencode has one approval control where Claude has six.** Its `--auto` is
+    the only lever, so the Permissions dropdown offers just two options when the
+    engine is opencode — auto-approve, and plan — rather than four more that
+    would quietly mean the same thing. Switching engines does not overwrite a
+    stored mode, so switching back restores it.
+  - **Credentials stay with opencode.** It keeps its own provider logins and
+    Chronos never sees a token, so there is nothing new stored on disk. The
+    model list offers opencode's free hosted catalogue; anything else — Kimi,
+    GPT, a local Ollama model — needs `opencode providers login` first and is
+    then reached through the new **Custom…** box, since neither CLI can
+    enumerate what your account can actually run.
+  - **The phone still cannot change it.** `agent` joins `permissionMode` and
+    `model` as published-but-read-only over the remote channel: which engine
+    runs is *what* a task does, and a remote caller may only change *when*.
+
+  New setting `chronos.opencodePath`. `src/models.ts` became `src/agents.ts`,
+  which now holds the engine table and both model lists.
+
+- **The activity-bar view is now a task inbox.** It held two rows — *Open
+  Manager* and *Schedule a Markdown file…* — both of which the status bar, the
+  command palette and the manager already offered, so it read as a second,
+  thinner UI beside the one that matters. The intent was to delete it outright.
+  That is not possible: VS Code only draws an activity-bar icon for a view
+  container, a container must hold at least one view, and there is no "icon runs
+  a command" API. Keeping the clock icon means a panel opens either way, so the
+  only real question was what goes in it.
+
+  It is now the front of the pipeline the manager does not have — **capture →
+  generate → schedule → run**, reading left to right across the two surfaces
+  with no overlap. Type a one-line task, press **Generate plan**, and Claude
+  works it into a real implementation plan that lands in the library ready to
+  schedule. The sidebar owns capture, because it is always visible and costs no
+  tab switch; the manager owns everything after it.
+
+  A task is a `.md` file in `<library>/tasks/` — no schema bump and no new
+  store, since `library.ts` is already parameterised by directory and
+  `listPlans` skips subdirectories, so `tasks/` never appears as a plan. A task
+  therefore survives a state reset, and can grow past one line.
+
+  Generation is an *authoring* session, like the manager's own Generate plan
+  button and outside the scheduler for the same reason: no `TaskRun`, no
+  concurrency slot, no transcript, no leader lock. It is a real terminal running
+  `claude` in plan mode, so Claude can ask clarifying questions before you
+  approve. The destination file appearing in the library is the completion
+  signal — the CLI exits when *you* close it, long after the plan is written —
+  at which point the task is cleared and the manager opens with the new plan
+  selected. Backing out at any point creates nothing and leaves the task where
+  it was.
+
+  The model comes from a QuickPick backed by a new `chronos.planModel` setting,
+  which remembers your last choice and renders as a dropdown in Settings. The
+  model list moved out of the webview and is sent to it in its state message, so
+  the sidebar picker and the manager's Model dropdown can no longer drift apart.
+
+  The drop controller moved to the new view unchanged: dropping a `.md` on the
+  panel still schedules it in place. That is why the view contributes no
+  `viewsWelcome` — welcome content cannot accept a drop, and the empty body has
+  to stay a drop target.
+
+- **A Generate plan button beside *Open in editor*, which turns a rough note in
+  the Plan text box into a run-ready plan.** Writing a plan meant either typing
+  the finished thing by hand or opening a terminal yourself, changing directory
+  to the right repo, remembering the plan-mode flag and pasting the text in.
+  Pressing the button saves what you have written, then opens a terminal in the
+  plan's working directory running `claude` in plan mode on the plan's chosen
+  model, already planning from your text. Approve the plan and Claude writes it
+  over the plan file; the library watcher reloads the Plan text box on its own,
+  so the result lands back in the manager without you fetching it.
+
+  This is a real interactive terminal — `createTerminal` and `sendText` — not
+  the read-only pseudo-terminal a scheduled run streams into, because the point
+  is to talk back to Claude. It is an authoring session rather than a run, so it
+  deliberately sits outside the scheduler: no concurrency slot, no run record,
+  no transcript, no leader lock.
+
+  The plan text is named, not pasted. `sendText` writes a single line into a
+  shell; a plan body is multi-line and can be tens of kilobytes, cmd.exe caps a
+  command line at 8191 characters, and every shell treats newlines, quotes and
+  `$` differently. The prompt therefore names the file and Claude reads it with
+  its own Read tool — no length limit, and only a path to quote. `--add-dir` on
+  the plan's own folder covers the usual case of a plan living in the library
+  while the working directory is the repo. Quoting branches on `vscode.env.shell`,
+  since no one form is safe in PowerShell, cmd and bash alike.
 
 - **A Runs panel across the bottom of the manager, listing every run for every
   plan.** Run history only ever lived inside the selected plan's detail pane, so
@@ -82,6 +191,20 @@ logic out; one of the moves also narrowed a guard.
   nor scrolls away itself. It takes a third of the panel at most and scrolls
   within that.
 
+- **Rename (✎) and delete (×) buttons on every library plan in the sidebar.**
+  Both meant selecting the plan and scrolling the detail pane to **Manage plan**
+  — several steps to act on a file already in front of you. They appear on
+  hover, stay visible on the selected row, and are reachable by keyboard.
+
+  Renaming saves the open editor first: a rename moves the file, so anything
+  typed has to reach the old path before it goes. Deleting does the opposite and
+  drops a queued save for that plan, which would otherwise have written the file
+  back a second or two after the delete removed it.
+
+  External plans get neither. Their file lives outside the library and is not
+  Chronus's to rename or delete — **Unschedule** in the detail pane is the
+  equivalent, and it is the same line the Manage plan section used to draw.
+
   "Completed" is stricter than the stored `spent` flag, which the scheduler also
   sets the moment a run starts and on a one-shot that was missed. A plan only
   moves once its last run has actually finished — so a one-shot mid-run stays
@@ -120,6 +243,149 @@ logic out; one of the moves also narrowed a guard.
   Windows. No change to Windows behaviour.
 
 ### Changed
+
+- **The two links at the foot of the plan library are now icon buttons.**
+  *Show library folder* and *Show results folder* were underlined blue text
+  stacked on two lines — the loudest thing in the panel, spent on the two actions
+  you reach for least. They are now a single row of two 24px codicon buttons that
+  sit quiet at `--muted` and light up on hover, like the rename and delete
+  actions on a plan row. The tooltip and the screen-reader label both still say
+  the full wording. Clicking either does exactly what it did before.
+
+  This adds the official VS Code **codicon** font to the project, vendored as
+  `media/codicon.css` and `media/codicon.ttf`. The webview may only load from
+  `media/` and the packaged `.vsix` excludes `node_modules/`, so the files are
+  committed there rather than copied by the build. Both are byte-identical to
+  upstream `@vscode/codicons`, so refreshing them is a re-copy, not a merge.
+
+- **There is one kind of plan now: every scheduled plan lives in the library.**
+  Chronos used to have two. Library plans were `.md` files in the library folder,
+  addressed by name. *External* plans were files anywhere else on disk that had
+  been scheduled where they lay — addressed by absolute path, listed under their
+  own heading with a badge, and denied rename and delete.
+
+  Nobody asked for that distinction, and it cost a second file watcher, a second
+  security model on the load and save messages, an `external` flag threaded
+  through the webview protocol, and a second list in the sidebar. It was already
+  inconsistent with itself: dropping a file onto the manager tab copied it into
+  the library, while dropping the same file onto the activity-bar view scheduled
+  it in place, and the README carried a paragraph whose only job was to explain
+  why.
+
+  **Every way of adding a plan now copies the file into your library and
+  schedules the copy** — New plan, Import, right-click → **Schedule with
+  Chronos**, and a drop onto either the activity-bar view or the manager tab.
+
+  Copy, never move: **your original file stays exactly where it is**, and Chronos
+  never edits or moves it. The consequence is worth stating plainly, because it
+  is the one thing this changes for you — after adding a file, editing your
+  original no longer affects what runs. The notice after adding says so.
+
+  A plan added from a project keeps that project as its working directory. The
+  file moves into the library; the work it does still belongs where it was.
+
+- **Plans scheduled in place by an older version are copied into the library on
+  first launch, and their schedules repointed at the copy.** Time, recurrence,
+  permission mode and working directory all survive; only the file path changes.
+  Two schedules pointing at the same file share one copy rather than getting two,
+  and a name that collides with an existing plan is imported as `name-2.md` with
+  both schedules intact. `Chronos: Show Logs` names every file it copied.
+
+  This runs on every activation and needs no schema bump — once it has run, every
+  path is already inside the library, so a second pass finds nothing to do.
+
+- **A schedule whose plan file no longer exists is removed, along with its run
+  history.** Previously it stayed in the list and fired on time, forever, failing
+  every time because the file it names is gone. Delete a plan file in your file
+  manager and the row now disappears within a second or so, whether the manager
+  tab is open at the time or not; the removal is recorded in the log, since it
+  discards work you created and the row is the only other place it was accounted
+  for.
+
+  A library folder that cannot be *read* is never mistaken for one that is empty.
+  If `chronos.libraryPath` points at an unplugged drive or an offline share,
+  Chronos touches nothing at all and says why in the log — pruning on that would
+  destroy an entire schedule over a kicked-out cable.
+
+- **New tasks default to the `auto` permission mode, not `bypassPermissions`.**
+  The old default handed every scheduled task unrestricted tool access, and on a
+  recurring series that waiver repeats indefinitely. `auto` leans on the CLI's
+  own judgement about what is safe to do unattended instead.
+
+  The trade-off is the reason the old default existed, and it has not gone away:
+  a mode that can still stop and ask has nobody to answer at 3am, so a run may
+  end having done only part of the job. Reviewing a plan before scheduling it
+  remains the real safety step, and `bypassPermissions` is still one click away
+  in the manager, still carrying its ⚠.
+
+  **Existing tasks are untouched.** The default applies when a series is
+  created; anything already scheduled keeps the mode stored with it. To move an
+  old task, change **Permissions** on it in the manager.
+
+- **The date picker no longer opens a white panel over a dark editor.** The
+  **When** field's popup is browser chrome — drawn outside the page, where no
+  selector reaches inside it. The one lever that does is `color-scheme`, now
+  declared on `body` and flipped for both light themes, which decides whether
+  Chromium paints the calendar, the **Repeat** dropdown and the native
+  scrollbars dark or light. The popup keeps Chromium's own layout; it stops
+  being the only light surface in the window.
+
+  What *is* reachable is the control itself, and that is what you look at the
+  rest of the time. The field now uses the editor font with tabular figures —
+  the two-typeface rule the rest of the manager already follows, since a date is
+  a measurement. The segment being edited is highlighted in sodium rather than
+  the OS selection blue, which belonged to no theme here, and the calendar glyph
+  sits muted and lights on hover, the same move the sidebar row actions make.
+
+- **The publisher is now `Z3n`, not `onemedialabs`.** The extension id becomes
+  `Z3n.chronos`, and the MIT copyright holder changes to match.
+
+  Note that VS Code lowercases extension ids, so the installed extension reports
+  itself as `z3n.chronos`. `package.json` keeps the capitalisation.
+
+  **This resets your data a second time,** for the same reason the rename below
+  did: VS Code keys stored state by the full id, and the publisher is half of
+  it. Scheduled tasks and run history do not carry over. Plan files are ordinary
+  Markdown and survive — copy them from the `onemedialabs.chronos\plans\` folder
+  in globalStorage into the new `Z3n.chronos\plans\` one and re-schedule them.
+  Settings are keyed by `chronos.*`, not by publisher, so those are kept.
+
+  **Uninstall `onemedialabs.chronos` before installing this build**, on the same
+  grounds as below: a changed id means the new build installs alongside the old
+  one rather than over it, and two schedulers can fire the same plan twice.
+
+- **The extension is now called Chronos, not Chronus.** The name was always meant
+  to be Chronos; it had simply been misspelled everywhere since the first commit.
+  Because it was never published, fixing it properly was still cheap, so the
+  rename goes all the way down: extension id (`onemedialabs.chronos`), settings
+  (`chronos.*`), command ids, view ids, storage keys and the `ChronosState` type.
+
+  **This resets your data.** VS Code keys an extension's stored state by id, so
+  `onemedialabs.chronos` starts with an empty one: scheduled tasks, run history
+  and any customised `chronus.*` settings do not carry over, and no migration was
+  written. Plan files are unaffected — they are ordinary Markdown in
+  globalStorage, so copy them from the `onemedialabs.chronus\plans\` folder into
+  the new `onemedialabs.chronos\plans\` one and re-schedule them.
+
+  **Uninstall the old extension before installing this build.** Two installs mean
+  two schedulers holding two separate lock files, neither aware of the other, and
+  the same plan can fire twice.
+
+- **New extension icon** (`media/icon.png`, 128×128) — the faceted sculpted
+  head, replacing the clock-and-arrows mark. It is the marketplace icon and the
+  manager panel's tab icon.
+
+  `media/chronos.svg`, the activity-bar icon, is deliberately left as the old
+  line mark. VS Code masks that icon to a single theme colour, so a photographic
+  image can only arrive there as a silhouette.
+
+- **Deleting a plan always asks now, and says the file is not recycled.** It
+  only asked when the plan was scheduled; an unscheduled one was unlinked on the
+  first click, with no way back. That was survivable while Delete was buried at
+  the bottom of the detail pane, but the new sidebar × puts a permanent delete
+  one misclick from every row. Both prompts now carry the same detail line —
+  *The file is deleted, not moved to the recycle bin* — because `removePlan`
+  unlinks, and a dialog that does not say so is worse than none.
 
 - **The detail pane follows the authoring flow: write the plan, decide when it
   runs, read what happened.** Plan text is first, schedule second, runs third.
@@ -191,9 +457,30 @@ logic out; one of the moves also narrowed a guard.
 
 ### Removed
 
+- **The External group and its badge**, along with everything that existed to
+  support the second kind of plan: the second `fs.watch` on an external plan's
+  own directory, `readPlanAt` / `writePlanAt` / `isScheduledPlan`, and the
+  `external` flag in the webview protocol.
+
+  The messages that address a plan — `loadPlan`, `savePlan`, `openInEditor`,
+  `schedulePlan`, `generatePlan` — now carry a **name and nothing else**. No
+  absolute path crosses the webview boundary in either direction, so every read,
+  write, schedule and open resolves through the one library guard rather than
+  through an "is this path actually in the schedule?" check standing in for it.
+  With a single group, the **Library** heading over it named nothing, so it went
+  too.
 - `.badge.is-repeat` — dead CSS, nothing ever emitted the class.
 - Status dots on library list items, which were redundant: each item already
   prints its next run in text.
+- **The Manage plan section at the foot of the detail pane.** Rename and Delete
+  moved to the sidebar row, where they act on a plan without selecting it first;
+  the section held nothing else worth the heading. The detail pane now ends
+  after the Runs section.
+- **Duplicate**, which had no home once the section went and no other entry
+  point. `library.duplicatePlan` and its tests are kept — the function is pure
+  and harmless, and restoring the feature is then a UI change only — but the
+  `duplicatePlan` webview message and its handler are gone, so nothing can
+  reach it. The IPC surface should not outlive the button.
 
 ## [0.8.0-rc.3] - 2026-08-02
 

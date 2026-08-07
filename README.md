@@ -1,51 +1,86 @@
-# Chronus
+# Chronos
 
 Schedule Claude Code tasks from Markdown plan files, inside VS Code.
 
-Right-click a `.md` file and choose **Schedule with Chronus**, pick a time, and
-Chronus runs `claude` against it — once, daily, or on chosen weekdays — saving a
+Right-click a `.md` file and choose **Schedule with Chronos**, pick a time, and
+Chronos runs `claude` against it — once, daily, or on chosen weekdays — saving a
 transcript of every run.
 
 ## The manager
 
-Chronus is a single editor tab: your plan library on the left, detail on the
+Chronos is a single editor tab: your plan library on the left, detail on the
 right — schedule, working directory, permissions, the plan text itself, and run
-history. Open it from the status bar item, the **Open Manager** row behind the
-clock icon in the activity bar, or `Chronus: Open Manager`.
+history. Open it from the status bar item, the **Open Manager** button in the
+Tasks view behind the clock icon in the activity bar, or `Chronos: Open Manager`.
 
 Add a plan four ways:
 
 - **New plan** creates one in your library.
 - **Right-click any `.md` file** — in the VS Code explorer or on an editor tab —
-  and choose **Schedule with Chronus**. Multi-select works.
-- **Drag `.md` files onto the Chronus view** in the activity bar, from either the
-  VS Code explorer or Windows Explorer.
-- **Import** copies a file into your library and schedules the copy.
+  and choose **Schedule with Chronos**. Multi-select works.
+- **Drag `.md` files onto the Tasks view** in the activity bar, or onto the
+  manager tab itself, from either the VS Code explorer or Windows Explorer.
+- **Import** picks files with a file dialog.
 
-The first three schedule the file where it lies, listed under **External**;
-**Import** copies it in. Dropping onto the manager tab itself also works, but
-copies rather than schedules in place: a file dropped from Windows Explorer no
-longer tells the editor where it came from, so there is no path to schedule. The
-notice after the drop says which happened.
+Every one of them **copies the file into your library and schedules the copy**.
+Your original stays exactly where it is, and Chronos never edits or moves it —
+which also means editing your original afterwards will not change what runs. The
+notice after adding says so.
+
+A plan dropped from a project keeps that project as its working directory, even
+though the plan file itself now lives in the library.
+
+## Tasks — capturing work before it is a plan
+
+The clock icon in the activity bar opens **Tasks**: a one-line inbox for things
+you have not written a plan for yet. It exists because a plan is a considered
+document and a thought is not, and because the sidebar is always there — no tab
+switch between having the idea and writing it down.
+
+Press **＋**, type the task, press Enter. That is the whole capture step.
+
+Press **Generate plan** (the lightbulb on a task row) and Chronos opens a
+terminal running `claude` in plan mode, already working from your task. Claude
+can ask you anything it needs before committing to an approach — that is why the
+session is interactive rather than headless. Approve the plan and it is written
+into your library as a real plan file, the task disappears, and the manager
+opens with the new plan selected and ready to schedule:
+
+```
+capture → generate → schedule → run
+```
+
+Back out at any point — Escape, closing the terminal, never approving — and
+nothing is created; the task stays exactly where it was.
+
+You pick the model each time from a dropdown. `chronos.planModel` remembers the
+last one you chose, and does not affect scheduled runs, which use each plan's
+own model setting.
+
+A task is a `.md` file in a `tasks` folder inside your library, so it is just a
+file like everything else here: it can grow past one line, you can edit it in a
+real editor, and it survives anything that resets Chronos's state.
+
+Dropping `.md` files on this view still schedules them — see above.
 
 ## The plan library
 
-A plan is a `.md` file in one folder — `chronus.libraryPath`, defaulting to the
+A plan is a `.md` file in one folder — `chronos.libraryPath`, defaulting to the
 extension's own storage. There is no index or database: the directory *is* the
-list, so editing a plan outside Chronus can never desynchronise anything.
+list, so editing a plan outside Chronos can never desynchronise anything.
 
-Plans you schedule from elsewhere on disk keep working and appear under
-**External**. They are edited in place — saved back to their own path, never
-copied into the library.
+Every scheduled plan lives here; there is only one kind of plan. Delete a plan
+file from the folder and its schedule goes with it, whether Chronos is open at
+the time or not.
 
 The in-app editor autosaves on blur. It is a plain textarea — for real editing,
 **Open in editor** gives you the actual VS Code editor on the same file. If a
-plan changes on disk while you have unsaved edits, Chronus says so rather than
+plan changes on disk while you have unsaved edits, Chronos says so rather than
 picking a winner.
 
 ## How it works
 
-Chronus pipes your plan file to the Claude Code CLI in headless mode:
+Chronos pipes your plan file to the Claude Code CLI in headless mode:
 
 ```powershell
 claude -p --output-format stream-json --verbose --permission-mode <mode>
@@ -81,35 +116,36 @@ preview; **raw log** still reaches the underlying event stream when something
 needs debugging.
 
 Transcripts live in `results` beside your plan library by default; set
-`chronus.resultsPath` to put them anywhere. **Show results folder** in the
+`chronos.resultsPath` to put them anywhere. **Show results folder** in the
 manager opens them in your file manager. Unlike raw logs, they are never
 deleted automatically.
 
 ## Read this before scheduling anything unattended
 
-Chronus runs an AI agent **while you are away from the machine**. Three things
+Chronos runs an AI agent **while you are away from the machine**. Three things
 follow from that:
 
-1. **Tasks default to `bypassPermissions` — full auto.** This is deliberate.
-   Chronus exists to run plans with nobody at the keyboard, and every gentler
-   mode blocks on a prompt no one is there to answer; the run then exits 0
-   having quietly done a fraction of the job. The consequence is that a
-   scheduled task has unrestricted tool access, and one bad plan on a recurring
-   schedule repeats indefinitely. **Reviewing the plan before you schedule it is
-   the safety step.** `acceptEdits` (auto-approve edits, still gate shell
-   commands) and `plan` remain selectable per task.
+1. **Tasks default to `auto`.** Chronos runs plans with nobody at the keyboard,
+   so the default leans on the CLI's own judgement about what is safe to do
+   unattended rather than waiving permissions outright. The trade-off is that a
+   mode which can still stop and ask has no one there to answer it at 3am, so a
+   run may end having done only part of the job. **Reviewing the plan before you
+   schedule it is the safety step.** `bypassPermissions` (full auto,
+   unrestricted tool access — and one bad plan on a recurring schedule repeats
+   indefinitely), `acceptEdits` (auto-approve edits, still gate shell commands)
+   and `plan` all remain selectable per task.
 2. **Runs cost money.** A trivial prompt can cost ~$0.17 once context is loaded.
    A daily series with a broken plan bills every day until you notice. The
    manager footer shows a rolling 7-day total for exactly this reason.
 3. **A run can "succeed" while doing less than you asked.** If permission gating
-   blocks tools, the run still exits 0. Chronus surfaces this as a
+   blocks tools, the run still exits 0. Chronos surfaces this as a
    `⚠ N denied` badge rather than a silent success, and does not retry it —
    retrying would hit the same gate.
 
 ## Behaviour worth knowing
 
 **Missed windows.** If your machine was asleep or VS Code was closed when a task
-was due, Chronus does **not** run it late. Past the grace window (15 minutes by
+was due, Chronos does **not** run it late. Past the grace window (15 minutes by
 default) the occurrence is marked *missed* and waits for your decision: run it
 now, reschedule, or skip. A week-long outage collapses into one decision, not
 seven notifications.
@@ -126,7 +162,7 @@ instants are derived from the rule, never accumulated.
 reconciled to failed on next launch and retried, rather than holding its
 concurrency slot forever.
 
-**Chronus only runs while VS Code is open.** It is an extension, not a daemon.
+**Chronos only runs while VS Code is open.** It is an extension, not a daemon.
 Tasks due while VS Code is closed are caught up (or marked missed) at next
 launch. For true machine-level scheduling you would want Windows Task Scheduler
 invoking `claude` directly.
@@ -135,16 +171,16 @@ invoking `claude` directly.
 
 | Setting | Default | Purpose |
 |---|---|---|
-| `chronus.claudePath` | `claude` | Path to the CLI |
-| `chronus.libraryPath` | *(extension storage)* | Where your plan `.md` files live |
-| `chronus.resultsPath` | *(`results` beside the library)* | Where run transcripts are written |
-| `chronus.maxConcurrent` | `1` | Parallel agents in one repo will collide — raise deliberately |
-| `chronus.maxRetries` | `3` | Attempts after a failure |
-| `chronus.retryDelayMinutes` | `60` | Delay before retrying |
-| `chronus.graceWindowMinutes` | `15` | How late a task may still run |
-| `chronus.idleTimeoutMinutes` | `15` | Kill a run producing no output |
-| `chronus.maxRuntimeMinutes` | `60` | Hard ceiling on one run |
-| `chronus.logRetentionDays` | `30` | Transcript retention |
+| `chronos.claudePath` | `claude` | Path to the CLI |
+| `chronos.libraryPath` | *(extension storage)* | Where your plan `.md` files live |
+| `chronos.resultsPath` | *(`results` beside the library)* | Where run transcripts are written |
+| `chronos.maxConcurrent` | `1` | Parallel agents in one repo will collide — raise deliberately |
+| `chronos.maxRetries` | `3` | Attempts after a failure |
+| `chronos.retryDelayMinutes` | `60` | Delay before retrying |
+| `chronos.graceWindowMinutes` | `15` | How late a task may still run |
+| `chronos.idleTimeoutMinutes` | `15` | Kill a run producing no output |
+| `chronos.maxRuntimeMinutes` | `60` | Hard ceiling on one run |
+| `chronos.logRetentionDays` | `30` | Transcript retention |
 
 ## Development
 

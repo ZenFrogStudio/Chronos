@@ -5,18 +5,68 @@
 
 export type KillReason = 'idle' | 'runtime' | 'cancelled' | 'shutdown';
 
-/** The final `type: "result"` event emitted by `--output-format stream-json`. */
-export interface ResultEnvelope {
-  type?: string;
-  subtype?: string;
-  is_error?: boolean;
-  session_id?: string;
-  total_cost_usd?: number;
-  num_turns?: number;
-  result?: string;
-  permission_denials?: unknown[];
-  api_error_status?: unknown;
-  terminal_reason?: string;
+/**
+ * What the stream said, folded down as it arrives.
+ *
+ * The stream used to be parsed twice — once per line for the transcript, then
+ * again over a stashed line at the end for the outcome. That stash-one-line
+ * trick only works for an engine with a single closing envelope, which Claude
+ * has and opencode does not: opencode reports cost and turns once per *step*.
+ * Accumulating as we parse works for both, and deletes the second parse.
+ */
+export interface RunSummary {
+  sessionId?: string;
+  costUsd?: number;
+  numTurns?: number;
+  /** Tools blocked by permission gating. */
+  denials: number;
+  /** The agent's closing message — the newest one wins. */
+  resultText?: string;
+  /** A terminal event was seen at all. Exit 0 without one means truncated. */
+  sawResult: boolean;
+  /** The engine reported the run itself as failed. */
+  isError: boolean;
+  /** HTTP status of an API error, where the engine reports one. */
+  apiErrorStatus?: string;
+}
+
+export function emptySummary(): RunSummary {
+  return { denials: 0, sawResult: false, isError: false };
+}
+
+/**
+ * Folds one parsed line into the running total. One merge serves both engines:
+ * only cost and turns accumulate, because only opencode splits them across
+ * steps — Claude states each once, and adding a single value yields that value.
+ * Everything else is the newest statement winning, which is what made the old
+ * "last result event wins" rule right and still is.
+ */
+export function foldSummary(into: RunSummary, add: Partial<RunSummary>): void {
+  if (add.costUsd !== undefined) {
+    into.costUsd = (into.costUsd ?? 0) + add.costUsd;
+  }
+  if (add.numTurns !== undefined) {
+    into.numTurns = (into.numTurns ?? 0) + add.numTurns;
+  }
+  if (add.sessionId) {
+    into.sessionId = add.sessionId;
+  }
+  if (add.resultText) {
+    into.resultText = add.resultText;
+  }
+  if (add.denials !== undefined) {
+    into.denials = add.denials;
+  }
+  if (add.isError !== undefined) {
+    into.isError = add.isError;
+  }
+  if (add.apiErrorStatus) {
+    into.apiErrorStatus = add.apiErrorStatus;
+  }
+  // Never unset: a run that produced a terminal event produced one.
+  if (add.sawResult) {
+    into.sawResult = true;
+  }
 }
 
 export interface Outcome {
@@ -60,19 +110,16 @@ const AUTH_PATTERNS = [
   /not logged in/i
 ];
 
-export const AUTH_ERROR_MESSAGE =
-  'Authentication required — the Claude CLI rejected your credentials. Retrying will not help.';
+/** Names the engine, since either one's credentials can be the problem. */
+export function authErrorMessage(engine: string): string {
+  return `Authentication required — the ${engine} CLI rejected your credentials. Retrying will not help.`;
+}
 
-function looksLikeAuthFailure(envelope: ResultEnvelope | undefined): boolean {
-  if (!envelope) {
-    return false;
-  }
-  const status = String(envelope.api_error_status ?? '');
-  if (status === '401' || status === '403') {
+function looksLikeAuthFailure(summary: RunSummary): boolean {
+  if (summary.apiErrorStatus === '401' || summary.apiErrorStatus === '403') {
     return true;
   }
-  const text = envelope.result ?? '';
-  return AUTH_PATTERNS.some((pattern) => pattern.test(text));
+  return AUTH_PATTERNS.some((pattern) => pattern.test(summary.resultText ?? ''));
 }
 
 /**
@@ -106,38 +153,27 @@ const KILL_MESSAGES: Record<KillReason, string> = {
   shutdown: 'Interrupted — VS Code shut down during execution.'
 };
 
-/** Last `type: "result"` line wins; earlier lines are progress events. */
-export function parseResultEnvelope(stdout: string): ResultEnvelope | undefined {
-  let found: ResultEnvelope | undefined;
-  for (const line of stdout.split('\n')) {
-    const trimmed = line.trim();
-    if (!trimmed.startsWith('{')) {
-      continue;
-    }
-    try {
-      const parsed = JSON.parse(trimmed) as ResultEnvelope;
-      if (parsed.type === 'result') {
-        found = parsed;
-      }
-    } catch {
-      // Progress lines can be truncated mid-stream; ignore and keep scanning.
-    }
-  }
-  return found;
-}
-
+/**
+ * The verdict on a finished run. The ladder is unchanged from when this read
+ * raw stdout — a kill is authoritative, then auth, then the exit code, then a
+ * missing result, then a reported error — it just reads fields now instead of
+ * re-parsing the stream.
+ */
 export function resolveOutcome(input: {
   exitCode: number | null;
-  stdout: string;
+  summary: RunSummary;
   killReason?: KillReason;
+  /** The engine, named in the messages below. */
+  engine?: string;
 }): Outcome {
-  const envelope = parseResultEnvelope(input.stdout);
+  const { summary } = input;
+  const engine = input.engine ?? 'claude';
   const base = {
-    sessionId: envelope?.session_id,
-    costUsd: envelope?.total_cost_usd,
-    numTurns: envelope?.num_turns,
-    denials: envelope?.permission_denials?.length ?? 0,
-    resultText: envelope?.result
+    sessionId: summary.sessionId,
+    costUsd: summary.costUsd,
+    numTurns: summary.numTurns,
+    denials: summary.denials,
+    resultText: summary.resultText
   };
 
   // A kill is authoritative regardless of what the stream contained.
@@ -152,12 +188,12 @@ export function resolveOutcome(input: {
 
   // Only consult the auth patterns once the run has actually failed. A healthy
   // run whose output merely *discusses* a 401 must not be misread as one.
-  const failed = input.exitCode !== 0 || envelope?.is_error === true;
-  if (failed && looksLikeAuthFailure(envelope)) {
+  const failed = input.exitCode !== 0 || summary.isError;
+  if (failed && looksLikeAuthFailure(summary)) {
     return {
       ...base,
       ok: false,
-      error: AUTH_ERROR_MESSAGE,
+      error: authErrorMessage(engine),
       retryable: false,
       authFailure: true
     };
@@ -167,14 +203,14 @@ export function resolveOutcome(input: {
     return {
       ...base,
       ok: false,
-      error: envelope?.result ?? `claude exited with code ${input.exitCode}.`,
+      error: summary.resultText ?? `${engine} exited with code ${input.exitCode}.`,
       retryable: true
     };
   }
 
   // Exit 0 with no result event means the contract was not met. Treating this
   // as success would silently mark an unfinished plan complete.
-  if (!envelope) {
+  if (!summary.sawResult) {
     return {
       ...base,
       ok: false,
@@ -183,11 +219,11 @@ export function resolveOutcome(input: {
     };
   }
 
-  if (envelope.is_error) {
+  if (summary.isError) {
     return {
       ...base,
       ok: false,
-      error: envelope.result ?? `Run reported an error (${envelope.subtype ?? 'unknown'}).`,
+      error: summary.resultText ?? 'Run reported an error.',
       retryable: true
     };
   }

@@ -1,11 +1,12 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
+import type { ConsolidationReport } from './consolidate';
 
 let channel: vscode.OutputChannel | undefined;
 
 export function initLog(context: vscode.ExtensionContext): void {
-  channel = vscode.window.createOutputChannel('Chronus');
+  channel = vscode.window.createOutputChannel('Chronos');
   context.subscriptions.push(channel);
 }
 
@@ -57,3 +58,24 @@ export const log = {
     write('error', err === undefined ? message : `${message} — ${describe(err)}`),
   show: () => channel?.show(true)
 };
+
+/**
+ * What consolidating the plan library did. It lives here rather than in
+ * `consolidate.ts` because that module is deliberately free of `vscode` so it
+ * can be tested in plain Node, and this channel is the one thing it cannot have.
+ *
+ * A discarded schedule is written at `warn`: it is user-created work, and once
+ * the row is gone from the manager the log is the only place it is accounted for.
+ */
+export function logConsolidation(report: ConsolidationReport): void {
+  if (report.libraryUnreadable) {
+    write('warn', `plan library unreadable, so nothing was consolidated: ${report.libraryUnreadable}`);
+    return;
+  }
+  for (const move of report.imported) {
+    write('info', `copied ${move.sourcePath} into the library as ${move.planName}`);
+  }
+  for (const name of report.droppedSchedules) {
+    write('warn', `removed the schedule for ${name} — its plan file no longer exists`);
+  }
+}

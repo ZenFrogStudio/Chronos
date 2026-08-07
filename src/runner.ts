@@ -2,9 +2,18 @@ import { ChildProcess, spawn } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
+import { Agent, agentFor } from './agents';
 import { buildArgs, preflightError } from './launch';
 import { log } from './log';
-import { KillReason, Outcome, resolveOutcome, watchdogVerdict } from './outcome';
+import {
+  emptySummary,
+  foldSummary,
+  KillReason,
+  Outcome,
+  resolveOutcome,
+  RunSummary,
+  watchdogVerdict
+} from './outcome';
 import { resultPathFor, withStatus } from './results';
 import { Store } from './store';
 import { nowUtc, truncate, truncateError } from './time';
@@ -28,14 +37,16 @@ interface ActiveRun {
   runId: string;
   seriesId: string;
   child: ChildProcess;
+  /** Which engine is running, so the parser and the messages can say. */
+  agent: Agent;
   startedAtMs: number;
   lastOutputAtMs: number;
   /**
-   * Only the newest `type: "result"` line, not the whole stream. The full
-   * transcript is already going to disk twice over; holding a megabyte of it in
-   * memory to read one line back out at the end is pure waste.
+   * The stream folded down as it arrives, rather than the stream itself. The
+   * full transcript is already going to disk twice over; holding a megabyte of
+   * it in memory to re-read at the end would be pure waste.
    */
-  lastResultLine: string;
+  summary: RunSummary;
   pending: string;
   logStream: fs.WriteStream;
   /** Absent when the results folder could not be written to. */
@@ -194,24 +205,25 @@ export class Runner implements vscode.Disposable {
     resultPath: string | undefined,
     startedAt: Date
   ): void {
+    const agent = agentFor(series.agent);
     const args = buildArgs(series);
-    const exe = config().get<string>('claudePath', 'claude');
+    const exe = agentExe(agent);
 
     log.info(`run ${run.id}: ${exe} ${args.join(' ')} (cwd ${series.cwd})`);
 
     let child: ChildProcess;
     try {
-      child = spawnClaude(exe, args, series.cwd);
+      child = spawnAgent(exe, args, series.cwd);
     } catch (err) {
       void this.store.updateRun(run.id, {
         status: 'failed',
         finishedAt: nowUtc(),
-        lastError: truncateError(`Could not start claude: ${String(err)}`)
+        lastError: truncateError(`Could not start ${agent.id}: ${String(err)}`)
       });
       this.finished.fire({
         runId: run.id,
         seriesId: series.id,
-        outcome: { ok: false, error: 'Could not start claude.', denials: 0, retryable: true }
+        outcome: { ok: false, error: `Could not start ${agent.id}.`, denials: 0, retryable: true }
       });
       return;
     }
@@ -221,9 +233,10 @@ export class Runner implements vscode.Disposable {
       runId: run.id,
       seriesId: series.id,
       child,
+      agent,
       startedAtMs: now,
       lastOutputAtMs: now,
-      lastResultLine: '',
+      summary: emptySummary(),
       pending: '',
       logStream: fs.createWriteStream(logPath, { flags: 'a' }),
       resultPath,
@@ -243,7 +256,7 @@ export class Runner implements vscode.Disposable {
     });
 
     child.on('error', (err) => {
-      active.logStream.write(`\n[chronus] spawn error: ${String(err)}\n`);
+      active.logStream.write(`\n[chronos] spawn error: ${String(err)}\n`);
     });
 
     child.on('close', (code) => {
@@ -261,7 +274,7 @@ export class Runner implements vscode.Disposable {
       onDidWrite: active.writer.event,
       onDidClose: active.closer.event,
       open: () => {
-        active.writer.fire(`\x1b[2mChronus — ${series.fileName}\x1b[0m\r\n`);
+        active.writer.fire(`\x1b[2mChronos — ${series.fileName}\x1b[0m\r\n`);
         active.writer.fire(`\x1b[2m${series.cwd}\x1b[0m\r\n\r\n`);
       },
       // Closing the tab of a live run cancels it; closing a finished one is a
@@ -270,7 +283,7 @@ export class Runner implements vscode.Disposable {
     };
 
     const terminal = vscode.window.createTerminal({
-      name: `Chronus: ${series.fileName}`,
+      name: `Chronos: ${series.fileName}`,
       pty
     });
 
@@ -299,9 +312,9 @@ export class Runner implements vscode.Disposable {
     active.pending = lines.pop() ?? '';
 
     for (const line of lines) {
-      const { events, isResult } = parseLine(line);
-      if (isResult) {
-        active.lastResultLine = line;
+      const { events, summary } = parseLine(line, active.agent.id);
+      if (summary) {
+        foldSummary(active.summary, summary);
       }
 
       for (const event of events) {
@@ -359,8 +372,9 @@ export class Runner implements vscode.Disposable {
 
     const outcome = resolveOutcome({
       exitCode,
-      stdout: active.lastResultLine,
-      killReason: active.killReason
+      summary: active.summary,
+      killReason: active.killReason,
+      engine: active.agent.id
     });
 
     const resultPath = await this.finishTranscript(active, outcome);
@@ -399,20 +413,31 @@ export class Runner implements vscode.Disposable {
 }
 
 function config(): vscode.WorkspaceConfiguration {
-  return vscode.workspace.getConfiguration('chronus');
+  return vscode.workspace.getConfiguration('chronos');
+}
+
+/** Where this engine's executable lives, per its own setting. */
+export function agentExe(agent: Agent): string {
+  return config().get<string>(agent.pathSetting, agent.exe);
 }
 
 /**
- * Confirms the CLI is reachable before a task depends on it. Deliberately not
- * awaited during activation: a bad `claudePath` should surface as a setup
- * notice when you install, not as a failed run at 2am, and neither should cost
- * anyone a slow editor start.
+ * Confirms an engine is reachable before a task depends on it, returning why
+ * not. Deliberately not awaited during activation: a bad path should surface as
+ * a setup notice when you install, not as a failed run at 2am, and neither
+ * should cost anyone a slow editor start.
+ *
+ * Doubles as the availability check behind the manager's Engine dropdown, which
+ * is the only honest one available — neither CLI can list its models, but both
+ * answer `--version`.
  */
-export function probeClaude(exe: string, timeoutMs = 5_000): Promise<string | undefined> {
+export function probeAgent(agent: Agent, timeoutMs = 5_000): Promise<string | undefined> {
+  const exe = agentExe(agent);
+
   return new Promise((resolve) => {
     let child: ChildProcess;
     try {
-      child = spawnClaude(exe, ['--version'], process.cwd());
+      child = spawnAgent(exe, ['--version'], process.cwd());
     } catch (err) {
       resolve(`Could not start "${exe}": ${String(err)}`);
       return;
@@ -428,7 +453,7 @@ export function probeClaude(exe: string, timeoutMs = 5_000): Promise<string | un
       resolve(problem);
     };
 
-    child.on('error', () => settle(`Could not run "${exe}". Check chronus.claudePath.`));
+    child.on('error', () => settle(`Could not run "${exe}". Check chronos.${agent.pathSetting}.`));
     child.on('close', (code) =>
       settle(code === 0 ? undefined : `"${exe} --version" exited with code ${code}.`)
     );
@@ -436,19 +461,29 @@ export function probeClaude(exe: string, timeoutMs = 5_000): Promise<string | un
 }
 
 /**
- * On Windows `claude` is a .cmd shim, which spawn cannot execute without a
- * shell. Under `shell: true` Node does not quote the executable, so a path
- * containing spaces has to be quoted here. Every argv entry is a fixed flag or
- * an enum value — the prompt travels on stdin, never the command line.
+ * On Windows both `claude` and `opencode` are .cmd shims, which spawn cannot
+ * execute without a shell. Under `shell: true` Node quotes nothing — not the
+ * executable, not the arguments — so both are quoted here.
+ *
+ * The prompt still travels on stdin, never the command line. Everything in
+ * `args` is a fixed flag, a validated enum value, or the working directory,
+ * which is the one entry that can contain a space and is the reason quoting the
+ * arguments matters rather than only the executable.
  */
-function spawnClaude(exe: string, args: string[], cwd: string): ChildProcess {
+function spawnAgent(exe: string, args: string[], cwd: string): ChildProcess {
   const isWindows = process.platform === 'win32';
-  return spawn(isWindows ? `"${exe}"` : exe, args, {
+  return spawn(isWindows ? quoteForCmd(exe) : exe, isWindows ? args.map(quoteForCmd) : args, {
     cwd,
     shell: isWindows,
     windowsHide: true,
     stdio: ['pipe', 'pipe', 'pipe']
   });
+}
+
+/** cmd has no escape character inside quotes, and a Windows path cannot contain
+ *  a double quote, so stripping one is a guard rather than a loss. */
+function quoteForCmd(value: string): string {
+  return `"${value.replace(/"/g, '')}"`;
 }
 
 /**
@@ -471,6 +506,7 @@ function openTranscript(
       transcriptHeader({
         fileName: series.fileName,
         cwd: series.cwd,
+        engine: agentFor(series.agent).label,
         permissionMode: series.permissionMode,
         model: series.model,
         startedAt,

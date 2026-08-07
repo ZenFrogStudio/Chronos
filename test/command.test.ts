@@ -79,12 +79,26 @@ describe('validateCommand — the allowlist', () => {
     assert.equal(verdict.ok, false);
   });
 
+  it('should_refuse_to_change_which_engine_runs_a_task', () => {
+    // `agent` decides which executable gets spawned, so it is *what* a task
+    // does — the same escalation as raising its permissions.
+    const verdict = check({ kind: 'setAgent', payload: { agent: 'opencode' } });
+
+    assert.equal(verdict.ok, false);
+  });
+
   it('should_ignore_extra_fields_smuggled_into_an_allowed_command', () => {
     // An accepted command must yield only the fields its own rule builds.
     const patch = patchOf(
       check({
         kind: 'setEnabled',
-        payload: { enabled: false, permissionMode: 'bypassPermissions', cwd: 'C:\\', filePath: 'x' }
+        payload: {
+          enabled: false,
+          permissionMode: 'bypassPermissions',
+          agent: 'opencode',
+          cwd: 'C:\\',
+          filePath: 'x'
+        }
       })
     );
 

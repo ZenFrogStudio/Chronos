@@ -13,6 +13,7 @@
   "//": "Modules deliberately kept free of `vscode` so they run in plain Node.",
   "include": [
     "test/**/*.ts",
+    "src/agents.ts",
     "src/command.ts",
     "src/decide.ts",
     "src/edit.ts",

@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { parseResultEnvelope, resolveOutcome, watchdogVerdict } from '../src/outcome';
+import { emptySummary, foldSummary, resolveOutcome, watchdogVerdict } from '../src/outcome';
 import { truncateError } from '../src/time';
-import { ERROR_MAX_CHARS } from '../src/types';
+import { parseLine } from '../src/transcript';
+import { AgentId, ERROR_MAX_CHARS } from '../src/types';
 
 /** A well-formed final result event, as emitted by --output-format stream-json. */
 function resultEvent(overrides: Record<string, unknown> = {}): string {
@@ -20,13 +21,45 @@ function resultEvent(overrides: Record<string, unknown> = {}): string {
 
 const INIT_EVENT = '{"type":"system","subtype":"init","session_id":"sess-1"}';
 
+/** `opencode run --format json`, whose payload sits one level down in `part`. */
+const opencodeEvent = (type: string, part: Record<string, unknown>) =>
+  JSON.stringify({ type, sessionID: 'ses_1', part });
+
+const stepFinish = (part: Record<string, unknown> = {}) =>
+  opencodeEvent('step_finish', { type: 'step-finish', reason: 'stop', ...part });
+
+const textEvent = (text: string) => opencodeEvent('text', { type: 'text', text });
+
+const errorEvent = (message: string) =>
+  JSON.stringify({
+    type: 'error',
+    sessionID: 'ses_1',
+    error: { name: 'UnknownError', data: { message } }
+  });
+
+/**
+ * A stream folded exactly as `Runner.onStdout` folds it. The outcome is no
+ * longer parsed out of stdout at the end, so the two modules are exercised
+ * together here rather than apart — which is also how they run in production.
+ */
+function summarise(stdout: string, agent: AgentId = 'claude') {
+  const summary = emptySummary();
+  for (const line of stdout.split('\n')) {
+    const parsed = parseLine(line, agent);
+    if (parsed.summary) {
+      foldSummary(summary, parsed.summary);
+    }
+  }
+  return summary;
+}
+
 describe('resolveOutcome — happy path', () => {
   it('should_report_success_and_carry_session_cost_and_turns', () => {
     // Arrange
     const stdout = `${INIT_EVENT}\n${resultEvent()}`;
 
     // Act
-    const outcome = resolveOutcome({ exitCode: 0, stdout });
+    const outcome = resolveOutcome({ exitCode: 0, summary: summarise(stdout) });
 
     // Assert
     assert.equal(outcome.ok, true);
@@ -41,7 +74,7 @@ describe('resolveOutcome — happy path', () => {
     // that the plan only partly executed.
     const stdout = resultEvent({ permission_denials: [{ tool: 'Bash' }, { tool: 'Write' }] });
 
-    const outcome = resolveOutcome({ exitCode: 0, stdout });
+    const outcome = resolveOutcome({ exitCode: 0, summary: summarise(stdout) });
 
     assert.equal(outcome.ok, true);
     assert.equal(outcome.denials, 2);
@@ -51,7 +84,7 @@ describe('resolveOutcome — happy path', () => {
     // Retrying hits the same permission gate, so it can never clear.
     const stdout = resultEvent({ permission_denials: [{ tool: 'Bash' }] });
 
-    const outcome = resolveOutcome({ exitCode: 0, stdout });
+    const outcome = resolveOutcome({ exitCode: 0, summary: summarise(stdout) });
 
     assert.equal(outcome.retryable, false);
   });
@@ -59,7 +92,7 @@ describe('resolveOutcome — happy path', () => {
 
 describe('resolveOutcome — failure modes', () => {
   it('should_fail_and_allow_retry_when_the_exit_code_is_nonzero', () => {
-    const outcome = resolveOutcome({ exitCode: 1, stdout: resultEvent() });
+    const outcome = resolveOutcome({ exitCode: 1, summary: summarise(resultEvent()) });
 
     assert.equal(outcome.ok, false);
     assert.equal(outcome.retryable, true);
@@ -67,7 +100,7 @@ describe('resolveOutcome — failure modes', () => {
 
   it('should_preserve_the_session_id_from_a_failed_run', () => {
     // Needed if the run is ever resumed rather than restarted.
-    const outcome = resolveOutcome({ exitCode: 1, stdout: resultEvent() });
+    const outcome = resolveOutcome({ exitCode: 1, summary: summarise(resultEvent()) });
 
     assert.equal(outcome.sessionId, 'sess-1');
   });
@@ -75,7 +108,7 @@ describe('resolveOutcome — failure modes', () => {
   it('should_fail_when_the_result_event_reports_is_error', () => {
     const stdout = resultEvent({ is_error: true, result: 'rate limit exceeded' });
 
-    const outcome = resolveOutcome({ exitCode: 0, stdout });
+    const outcome = resolveOutcome({ exitCode: 0, summary: summarise(stdout) });
 
     assert.equal(outcome.ok, false);
     assert.equal(outcome.error, 'rate limit exceeded');
@@ -84,26 +117,26 @@ describe('resolveOutcome — failure modes', () => {
 
   it('should_fail_when_exit_is_zero_but_no_result_event_was_emitted', () => {
     // Treating this as success would mark an unfinished plan complete.
-    const outcome = resolveOutcome({ exitCode: 0, stdout: INIT_EVENT });
+    const outcome = resolveOutcome({ exitCode: 0, summary: summarise(INIT_EVENT) });
 
     assert.equal(outcome.ok, false);
     assert.match(outcome.error ?? '', /No result event/);
   });
 
   it('should_fail_when_stdout_is_empty', () => {
-    const outcome = resolveOutcome({ exitCode: 0, stdout: '' });
+    const outcome = resolveOutcome({ exitCode: 0, summary: summarise('') });
 
     assert.equal(outcome.ok, false);
   });
 
   it('should_fail_when_stdout_is_not_json_at_all', () => {
-    const outcome = resolveOutcome({ exitCode: 0, stdout: 'command not found' });
+    const outcome = resolveOutcome({ exitCode: 0, summary: summarise('command not found') });
 
     assert.equal(outcome.ok, false);
   });
 
   it('should_fail_when_the_process_died_without_an_exit_code', () => {
-    const outcome = resolveOutcome({ exitCode: null, stdout: resultEvent() });
+    const outcome = resolveOutcome({ exitCode: null, summary: summarise(resultEvent()) });
 
     assert.equal(outcome.ok, false);
   });
@@ -111,7 +144,7 @@ describe('resolveOutcome — failure modes', () => {
 
 describe('resolveOutcome — kills', () => {
   it('should_fail_and_allow_retry_when_killed_for_idling', () => {
-    const outcome = resolveOutcome({ exitCode: null, stdout: '', killReason: 'idle' });
+    const outcome = resolveOutcome({ exitCode: null, summary: summarise(''), killReason: 'idle' });
 
     assert.equal(outcome.ok, false);
     assert.equal(outcome.retryable, true);
@@ -119,21 +152,21 @@ describe('resolveOutcome — kills', () => {
   });
 
   it('should_fail_and_allow_retry_when_killed_for_exceeding_max_runtime', () => {
-    const outcome = resolveOutcome({ exitCode: null, stdout: '', killReason: 'runtime' });
+    const outcome = resolveOutcome({ exitCode: null, summary: summarise(''), killReason: 'runtime' });
 
     assert.equal(outcome.ok, false);
     assert.equal(outcome.retryable, true);
   });
 
   it('should_not_retry_a_run_the_user_cancelled', () => {
-    const outcome = resolveOutcome({ exitCode: null, stdout: '', killReason: 'cancelled' });
+    const outcome = resolveOutcome({ exitCode: null, summary: summarise(''), killReason: 'cancelled' });
 
     assert.equal(outcome.ok, false);
     assert.equal(outcome.retryable, false);
   });
 
   it('should_retry_a_run_interrupted_by_shutdown', () => {
-    const outcome = resolveOutcome({ exitCode: null, stdout: '', killReason: 'shutdown' });
+    const outcome = resolveOutcome({ exitCode: null, summary: summarise(''), killReason: 'shutdown' });
 
     assert.equal(outcome.retryable, true);
   });
@@ -142,7 +175,7 @@ describe('resolveOutcome — kills', () => {
     // The process was killed after emitting a result; the kill wins.
     const outcome = resolveOutcome({
       exitCode: 0,
-      stdout: resultEvent(),
+      summary: summarise(resultEvent()),
       killReason: 'runtime'
     });
 
@@ -150,28 +183,142 @@ describe('resolveOutcome — kills', () => {
   });
 });
 
-describe('parseResultEnvelope — malformed streams', () => {
+describe('foldSummary — malformed streams', () => {
   it('should_ignore_a_truncated_progress_line_and_use_the_later_result', () => {
     // Stream chunks can split mid-line.
     const stdout = `{"type":"assistant","message":{"content":[{"type":"tex\n${resultEvent()}`;
 
-    assert.equal(resolveOutcome({ exitCode: 0, stdout }).ok, true);
+    assert.equal(resolveOutcome({ exitCode: 0, summary: summarise(stdout) }).ok, true);
   });
 
-  it('should_use_the_last_result_event_when_several_are_present', () => {
+  it('should_let_the_last_result_event_settle_the_verdict', () => {
+    // Everything but cost and turns is the newest statement winning, so an
+    // earlier error does not condemn a run that went on to succeed.
     const stdout = `${resultEvent({ is_error: true, result: 'stale' })}\n${resultEvent()}`;
 
-    assert.equal(resolveOutcome({ exitCode: 0, stdout }).ok, true);
+    assert.equal(resolveOutcome({ exitCode: 0, summary: summarise(stdout) }).ok, true);
   });
 
   it('should_ignore_blank_and_non_object_lines', () => {
     const stdout = `\n\nnull\n[]\n${resultEvent()}\n\n`;
 
-    assert.equal(parseResultEnvelope(stdout)?.session_id, 'sess-1');
+    assert.equal(summarise(stdout).sessionId, 'sess-1');
   });
 
-  it('should_return_undefined_when_no_result_event_exists', () => {
-    assert.equal(parseResultEnvelope(INIT_EVENT), undefined);
+  it('should_not_claim_a_result_was_seen_when_none_was', () => {
+    assert.equal(summarise(INIT_EVENT).sawResult, false);
+  });
+});
+
+describe('foldSummary — accumulating a stream', () => {
+  it('should_add_up_cost_and_turns_reported_per_step', () => {
+    // opencode reports both once per step rather than once per run. Claude
+    // reports its cumulative totals in a single event, so the same addition
+    // leaves those untouched.
+    const summary = summarise(
+      [
+        stepFinish({ cost: 0.02 }),
+        stepFinish({ cost: 0.03 }),
+        stepFinish({ cost: 0.05 })
+      ].join('\n'),
+      'opencode'
+    );
+
+    assert.equal(summary.numTurns, 3);
+    assert.ok(Math.abs((summary.costUsd ?? 0) - 0.1) < 1e-9, String(summary.costUsd));
+  });
+
+  it('should_keep_the_newest_closing_message_rather_than_the_whole_conversation', () => {
+    // `resultText` is what a run card shows, and what the card wants is how the
+    // run ended — not its running commentary.
+    const summary = summarise(
+      [textEvent('Checking the build.'), textEvent('Done — two tests fixed.')].join('\n'),
+      'opencode'
+    );
+
+    assert.equal(summary.resultText, 'Done — two tests fixed.');
+  });
+
+  it('should_carry_the_session_id_from_any_opencode_event', () => {
+    // Unlike Claude, opencode has no init event — every line repeats the id.
+    assert.equal(summarise(textEvent('hello'), 'opencode').sessionId, 'ses_1');
+  });
+});
+
+describe('resolveOutcome — opencode runs', () => {
+  it('should_report_success_with_the_totals_summed_across_steps', () => {
+    const stdout = [
+      stepFinish({ cost: 0.01 }),
+      textEvent('Created hello.txt and read it back.'),
+      stepFinish({ cost: 0.02 })
+    ].join('\n');
+
+    const outcome = resolveOutcome({
+      exitCode: 0,
+      summary: summarise(stdout, 'opencode'),
+      engine: 'opencode'
+    });
+
+    assert.equal(outcome.ok, true);
+    assert.equal(outcome.numTurns, 2);
+    assert.equal(outcome.sessionId, 'ses_1');
+    assert.equal(outcome.resultText, 'Created hello.txt and read it back.');
+  });
+
+  it('should_fail_and_allow_retry_when_opencode_exits_nonzero', () => {
+    // opencode exits 1 on failure, and says why in an error event.
+    const stdout = [stepFinish(), errorEvent('Unexpected server error.')].join('\n');
+
+    const outcome = resolveOutcome({
+      exitCode: 1,
+      summary: summarise(stdout, 'opencode'),
+      engine: 'opencode'
+    });
+
+    assert.equal(outcome.ok, false);
+    assert.equal(outcome.error, 'Unexpected server error.');
+    assert.equal(outcome.retryable, true);
+  });
+
+  it('should_fail_an_opencode_error_event_even_when_the_process_exits_zero', () => {
+    const outcome = resolveOutcome({
+      exitCode: 0,
+      summary: summarise(errorEvent('provider is not configured'), 'opencode'),
+      engine: 'opencode'
+    });
+
+    assert.equal(outcome.ok, false);
+    assert.equal(outcome.error, 'provider is not configured');
+  });
+
+  it('should_fail_when_opencode_exits_zero_having_finished_no_step', () => {
+    // The rule that protects against a silently truncated run, on both engines:
+    // a stream with no terminal event has not confirmed anything.
+    const outcome = resolveOutcome({
+      exitCode: 0,
+      summary: summarise(textEvent('working on it'), 'opencode'),
+      engine: 'opencode'
+    });
+
+    assert.equal(outcome.ok, false);
+    assert.match(outcome.error ?? '', /No result event/);
+  });
+
+  it('should_name_the_engine_that_failed_rather_than_always_claude', () => {
+    const outcome = resolveOutcome({ exitCode: 2, summary: emptySummary(), engine: 'opencode' });
+
+    assert.equal(outcome.error, 'opencode exited with code 2.');
+  });
+
+  it('should_name_the_engine_whose_credentials_were_rejected', () => {
+    const outcome = resolveOutcome({
+      exitCode: 1,
+      summary: summarise(errorEvent('unauthorized'), 'opencode'),
+      engine: 'opencode'
+    });
+
+    assert.equal(outcome.authFailure, true);
+    assert.match(outcome.error ?? '', /the opencode CLI rejected your credentials/);
   });
 });
 
@@ -181,7 +328,7 @@ describe('resolveOutcome — authentication', () => {
     // apart only delay the discovery by three hours.
     const stdout = resultEvent({ is_error: true, result: 'Invalid API key · Please run /login' });
 
-    const outcome = resolveOutcome({ exitCode: 1, stdout });
+    const outcome = resolveOutcome({ exitCode: 1, summary: summarise(stdout) });
 
     assert.equal(outcome.ok, false);
     assert.equal(outcome.retryable, false);
@@ -191,7 +338,7 @@ describe('resolveOutcome — authentication', () => {
   it('should_detect_an_auth_failure_from_the_api_error_status', () => {
     const stdout = resultEvent({ is_error: true, api_error_status: 401, result: 'request failed' });
 
-    const outcome = resolveOutcome({ exitCode: 1, stdout });
+    const outcome = resolveOutcome({ exitCode: 1, summary: summarise(stdout) });
 
     assert.equal(outcome.authFailure, true);
     assert.equal(outcome.retryable, false);
@@ -200,7 +347,7 @@ describe('resolveOutcome — authentication', () => {
   it('should_still_retry_an_ordinary_failure', () => {
     const stdout = resultEvent({ is_error: true, result: 'The plan referenced a missing file.' });
 
-    const outcome = resolveOutcome({ exitCode: 1, stdout });
+    const outcome = resolveOutcome({ exitCode: 1, summary: summarise(stdout) });
 
     assert.equal(outcome.retryable, true);
     assert.equal(outcome.authFailure, undefined);
@@ -210,7 +357,7 @@ describe('resolveOutcome — authentication', () => {
     // The agent writing *about* an auth error is not an auth error.
     const stdout = resultEvent({ result: 'Added handling for unauthorized 401 responses.' });
 
-    const outcome = resolveOutcome({ exitCode: 0, stdout });
+    const outcome = resolveOutcome({ exitCode: 0, summary: summarise(stdout) });
 
     assert.equal(outcome.ok, true);
     assert.equal(outcome.authFailure, undefined);
@@ -219,7 +366,7 @@ describe('resolveOutcome — authentication', () => {
   it('should_preserve_session_and_cost_from_an_auth_failure', () => {
     const stdout = resultEvent({ is_error: true, result: 'Unauthorized' });
 
-    const outcome = resolveOutcome({ exitCode: 1, stdout });
+    const outcome = resolveOutcome({ exitCode: 1, summary: summarise(stdout) });
 
     assert.equal(outcome.sessionId, 'sess-1');
     assert.equal(outcome.costUsd, 0.17);

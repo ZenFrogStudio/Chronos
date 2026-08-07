@@ -70,8 +70,40 @@ describe('edit — the model argument', () => {
     }
   });
 
+  it('should_accept_a_provider_qualified_model_id', () => {
+    // Every opencode model id needs a slash, and a local one needs a colon too.
+    assert.deepEqual(seriesEdit({ model: 'opencode/north-mini-code-free' }).patch, {
+      model: 'opencode/north-mini-code-free'
+    });
+    assert.deepEqual(seriesEdit({ model: 'ollama/gemma4:26b' }).patch, {
+      model: 'ollama/gemma4:26b'
+    });
+  });
+
   it('should_reject_a_model_long_enough_to_be_a_payload', () => {
     assert.deepEqual(seriesEdit({ model: 'a'.repeat(200) }).rejected, ['model']);
+  });
+});
+
+describe('edit — the engine', () => {
+  it('should_accept_an_engine_this_build_knows_about', () => {
+    assert.deepEqual(seriesEdit({ agent: 'opencode' }).patch, { agent: 'opencode' });
+    assert.deepEqual(seriesEdit({ agent: 'claude' }).patch, { agent: 'claude' });
+  });
+
+  it('should_read_an_empty_engine_as_claude', () => {
+    const { patch, rejected } = seriesEdit({ agent: '' });
+
+    assert.deepEqual(patch, { agent: undefined });
+    assert.deepEqual(rejected, []);
+  });
+
+  it('should_reject_an_engine_that_does_not_exist', () => {
+    // `agent` chooses which executable gets spawned, so it is checked against a
+    // closed list rather than by shape.
+    for (const hostile of ['codex', 'C:\\evil.exe', 'claude; calc', 1, {}]) {
+      assert.deepEqual(seriesEdit({ agent: hostile }).rejected, ['agent'], String(hostile));
+    }
   });
 });
 

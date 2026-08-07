@@ -17,31 +17,34 @@
 
   const DAY_LABELS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
   const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-  const PERMISSION_MODES = ['acceptEdits', 'auto', 'dontAsk', 'plan', 'bypassPermissions'];
-  // `value` is passed to the CLI's --model verbatim; '' means the account default.
-  // Pinned IDs run a specific model; the bare aliases track the newest of a family.
-  const MODELS = [
-    { value: '', label: 'Account default' },
-    { value: 'claude-opus-5', label: 'Opus 5' },
-    { value: 'claude-opus-4-8', label: 'Opus 4.8' },
-    { value: 'claude-sonnet-5', label: 'Sonnet 5' },
-    { value: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5' },
-    { value: 'claude-fable-5', label: 'Fable 5' },
-    { value: 'opus', label: 'Opus (latest)' },
-    { value: 'sonnet', label: 'Sonnet (latest)' },
-    { value: 'haiku', label: 'Haiku (latest)' }
-  ];
+
+  /**
+   * Approval settings, per engine. opencode has one control where Claude has
+   * six, so it is offered the two that mean something — approve everything, or
+   * plan only — rather than four more that would quietly map onto the same flag.
+   */
+  const PERMISSION_MODES = {
+    claude: ['acceptEdits', 'auto', 'dontAsk', 'plan', 'bypassPermissions'],
+    opencode: ['auto', 'plan']
+  };
+
+  /** Never a real model id: it starts with `_`, which the host's pattern rejects. */
+  const CUSTOM_MODEL = '__custom';
   const SAVE_DEBOUNCE_MS = 2000;
 
-  /** @type {{plans: any[], external: any[], series: any[], runs: any[], activity: {upcoming: any[], recent: any[]}, costLast7Days: number, libraryPath: string, setupProblem?: string, schedulerElsewhere?: boolean}} */
+  /** @type {{plans: any[], series: any[], runs: any[], activity: {upcoming: any[], recent: any[]}, costLast7Days: number, libraryPath: string, agents: {id: string, label: string, models: {value: string, label: string}[]}[], setupProblem?: string, schedulerElsewhere?: boolean}} */
   let state = {
     plans: [],
-    external: [],
     series: [],
     runs: [],
     activity: { upcoming: [], recent: [] },
     costLast7Days: 0,
-    libraryPath: ''
+    libraryPath: '',
+    // Sent by the extension from `src/agents.ts`, so the sidebar's model picker
+    // and these dropdowns cannot drift apart, and only engines this machine can
+    // actually run are listed. Empty only before the first state message
+    // arrives, which is why every read below tolerates an empty list.
+    agents: []
   };
 
   /** Selection and editor buffer live here, never in the DOM — a re-render
@@ -50,17 +53,21 @@
   /** Runs-panel state, held here for the same reason. */
   let activityFilter = 'all';
   let activityCollapsed = false;
+  /** A plan is addressed by name alone — no path from here ever reaches the
+   *  filesystem, which is what lets the host resolve every read and write
+   *  through the one library guard. */
   let editor = {
     name: /** @type {string|null} */ (null),
     text: '',
     dirty: false,
-    conflict: false,
-    filePath: /** @type {string|null} */ (null),
-    external: false
+    conflict: false
   };
   let saveTimer = 0;
   let noticeTimer = 0;
   let elapsedTimer = 0;
+  /** Whether the Model field is showing its free-text box. Curated lists go
+   *  stale, and the host validates whatever is typed by shape. */
+  let customModel = false;
 
   const previous = vscode.getState();
   if (previous && previous.selected) selected = previous.selected;
@@ -119,8 +126,7 @@
     return `${Math.round(hours / 24)}d ago`;
   }
 
-  const allPlans = () => [...state.plans, ...state.external];
-  const planByName = (name) => allPlans().find((p) => p.name === name);
+  const planByName = (name) => state.plans.find((p) => p.name === name);
   const seriesForPlan = (plan) =>
     plan ? state.series.find((s) => samePath(s.filePath, plan.filePath)) : undefined;
   const seriesById = (id) => state.series.find((s) => s.id === id);
@@ -128,11 +134,17 @@
   /** The plan a panel row should select. Absent once the series is unscheduled. */
   function planForSeries(id) {
     const series = seriesById(id);
-    return series ? allPlans().find((p) => samePath(p.filePath, series.filePath)) : undefined;
+    return series ? state.plans.find((p) => samePath(p.filePath, series.filePath)) : undefined;
   }
 
   const repeatOf = (s) =>
     !s.recurrence ? 'once' : s.recurrence.daysOfWeek.length === 7 ? 'daily' : 'weekly';
+
+  /** A series with no engine is a Claude series — the same rule the host uses. */
+  const agentIdOf = (s) => (s && s.agent) || 'claude';
+  const agentOf = (s) =>
+    state.agents.find((a) => a.id === agentIdOf(s)) || state.agents[0];
+  const modelsOf = (s) => (agentOf(s) || { models: [] }).models;
 
   const isRunning = (s) =>
     !!s && state.runs.some((r) => r.seriesId === s.id && r.status === 'running');
@@ -256,11 +268,11 @@
     // A broken CLI outranks a dormant scheduler: it breaks every window, not
     // just this one.
     if (state.setupProblem) {
-      setupEl.textContent = `Chronus cannot reach the Claude CLI. ${state.setupProblem}`;
+      setupEl.textContent = `Chronos cannot reach the Claude CLI. ${state.setupProblem}`;
       setupEl.hidden = false;
     } else if (state.schedulerElsewhere) {
       setupEl.textContent =
-        'Another VS Code window is running the Chronus scheduler. ' +
+        'Another VS Code window is running the Chronos scheduler. ' +
         'Nothing will run from this window, and changes made here may not reach it.';
       setupEl.hidden = false;
     } else {
@@ -302,13 +314,12 @@
     const match = (p) => !term || p.title.toLowerCase().includes(term);
     const live = (p) => match(p) && !isDone(p);
 
-    const library = state.plans.filter(live);
-    const external = state.external.filter(live);
+    const plans = state.plans.filter(live);
 
-    // Done plans leave their source group, newest first. They render into their
-    // own pinned region at the foot of the panel rather than into the scrolling
-    // list, so a growing pile of them never pushes the live plans out of view.
-    const done = allPlans()
+    // Done plans move out, newest first. They render into their own pinned region
+    // at the foot of the panel rather than into the scrolling list, so a growing
+    // pile of them never pushes the live plans out of view.
+    const done = state.plans
       .filter((p) => match(p) && isDone(p))
       .sort((a, b) =>
         recencyOf(lastRun(seriesForPlan(b))).localeCompare(recencyOf(lastRun(seriesForPlan(a))))
@@ -317,7 +328,7 @@
     completedEl.hidden = !done.length;
     completedListEl.innerHTML = done.map(planItem).join('');
 
-    if (!library.length && !external.length) {
+    if (!plans.length) {
       // With nothing live but something completed, the pinned region below is
       // already the answer — an empty-state above it would contradict it.
       listEl.innerHTML = done.length
@@ -328,14 +339,9 @@
       return;
     }
 
-    let html = '';
-    if (library.length) {
-      html += `<p class="plan-group">Library</p>${library.map(planItem).join('')}`;
-    }
-    if (external.length) {
-      html += `<p class="plan-group">External</p>${external.map(planItem).join('')}`;
-    }
-    listEl.innerHTML = html;
+    // No group heading: there is one kind of plan, so a heading over the only
+    // group names nothing.
+    listEl.innerHTML = plans.map(planItem).join('');
   }
 
   /** The line under a plan's name: where that plan is in its life. */
@@ -368,17 +374,31 @@
       isDone(plan) ? 'is-done' : ''
     ].join(' ');
 
-    return `<button class="${classes}" type="button"
-      data-action="select" data-name="${esc(plan.name)}" data-focus-key="plan-${esc(plan.name)}">
-      <span class="plan-name">${esc(plan.title)}</span>
-      <span class="plan-meta">${esc(meta)}</span>
-    </button>`;
+    const actions = `<span class="plan-actions">
+        <button class="plan-action" type="button" data-action="rename"
+          data-name="${esc(plan.name)}" data-focus-key="rename-${esc(plan.name)}"
+          title="Rename plan" aria-label="Rename ${esc(plan.title)}">&#9998;</button>
+        <button class="plan-action is-danger" type="button" data-action="remove"
+          data-name="${esc(plan.name)}" data-focus-key="remove-${esc(plan.name)}"
+          title="Delete plan" aria-label="Delete ${esc(plan.title)}">&#215;</button>
+      </span>`;
+
+    // A row is a wrapper holding several buttons rather than one button, because
+    // a button cannot be nested inside a button.
+    return `<div class="plan-row">
+      <button class="${classes}" type="button"
+        data-action="select" data-name="${esc(plan.name)}" data-focus-key="plan-${esc(plan.name)}">
+        <span class="plan-name">${esc(plan.title)}</span>
+        <span class="plan-meta">${esc(meta)}</span>
+      </button>
+      ${actions}
+    </div>`;
   }
 
   function renderDetail() {
     const plan = planByName(selected);
     if (!plan) {
-      detailEl.innerHTML = allPlans().length
+      detailEl.innerHTML = state.plans.length
         ? '<p class="empty">Select a plan, or create one.</p>'
         : firstRunEmptyState();
       return;
@@ -393,16 +413,14 @@
         <div class="head-text">
           <div class="head-title-row">
             <h2 class="detail-title">${esc(plan.title)}</h2>
-            ${plan.external ? '<span class="badge">External</span>' : ''}
           </div>
           ${headStatus(series)}
           <p class="detail-path">${esc(plan.filePath)}</p>
         </div>
       </div>
-      ${editorSection()}
+      ${editorSection(series)}
       ${series ? scheduleSection(series) : unscheduledSection(plan)}
       ${series ? runsSection(series) : ''}
-      ${manageSection(plan)}
     `;
 
     mountEditor(plan);
@@ -411,7 +429,7 @@
   function firstRunEmptyState() {
     return `<div class="empty-first-run">
       <h2 class="empty-title">Schedule Claude Code tasks from Markdown plans</h2>
-      <p>Chronus runs a plan file with the Claude CLI on a schedule you choose —
+      <p>Chronos runs a plan file with the Claude CLI on a schedule you choose —
         once, daily, or on set weekdays — and saves a transcript of every run.</p>
       <p>Two ways to add a plan:</p>
       <ul class="empty-ways">
@@ -419,19 +437,6 @@
         <li><strong>Drop a <code>.md</code> file</strong> anywhere on this window, or use
           <strong>Import</strong>, to schedule a plan you already have.</li>
       </ul>
-    </div>`;
-  }
-
-  /** Rare, and one of them is destructive — so it sits at the bottom. */
-  function manageSection(plan) {
-    if (plan.external) return '';
-    return `<div class="section">
-      <h3 class="section-title">Manage plan</h3>
-      <div class="actions">
-        <button class="button is-quiet" type="button" data-action="rename">Rename</button>
-        <button class="button is-quiet" type="button" data-action="duplicate">Duplicate</button>
-        <button class="button is-quiet is-danger" type="button" data-action="delete">Delete</button>
-      </div>
     </div>`;
   }
 
@@ -475,23 +480,9 @@
           </select>
         </label>
 
-        <label class="field">
-          <span class="field-label">Permissions</span>
-          <select class="field-input" data-field="permissionMode" data-focus-key="perm">
-            ${PERMISSION_MODES.map(
-              (m) => `<option value="${m}" ${m === s.permissionMode ? 'selected' : ''}>${m}${m === 'bypassPermissions' ? ' ⚠' : ''}</option>`
-            ).join('')}
-          </select>
-        </label>
-
-        <label class="field">
-          <span class="field-label">Model</span>
-          <select class="field-input" data-field="model" data-focus-key="model">
-            ${MODELS.map(
-              (m) => `<option value="${esc(m.value)}" ${m.value === (s.model ?? '') ? 'selected' : ''}>${esc(m.label)}</option>`
-            ).join('')}
-          </select>
-        </label>
+        ${permissionField(s)}
+        ${engineField(s)}
+        ${modelField(s)}
       </div>
       ${dayToggles}
 
@@ -511,11 +502,104 @@
     </div>`;
   }
 
-  function editorSection() {
+  /**
+   * Only the modes the chosen engine actually has. When a series carries a mode
+   * the engine does not offer — a Claude task switched to opencode still stores
+   * `bypassPermissions` — the nearest equivalent is shown rather than written,
+   * so switching back does not lose the original choice. What is shown is what
+   * the run will do: `buildArgs` maps all four permissive modes onto `--auto`.
+   */
+  function permissionField(s) {
+    const modes = PERMISSION_MODES[agentIdOf(s)] || PERMISSION_MODES.claude;
+    const current = modes.includes(s.permissionMode) ? s.permissionMode : 'auto';
+
+    return `<label class="field">
+      <span class="field-label">Permissions</span>
+      <select class="field-input" data-field="permissionMode" data-focus-key="perm">
+        ${modes
+          .map(
+            (m) =>
+              `<option value="${m}" ${m === current ? 'selected' : ''}>${m}${m === 'bypassPermissions' ? ' ⚠' : ''}</option>`
+          )
+          .join('')}
+      </select>
+    </label>`;
+  }
+
+  /**
+   * Hidden when there is nothing to choose between — a machine with only the
+   * Claude CLI installed gets the field it had before engines existed. It
+   * reappears if a task is already pinned to an engine that has since gone
+   * missing, so that is visible rather than silent.
+   */
+  function engineField(s) {
+    if (state.agents.length < 2 && agentIdOf(s) === 'claude') return '';
+
+    const options = state.agents.some((a) => a.id === agentIdOf(s))
+      ? state.agents
+      : [...state.agents, { id: agentIdOf(s), label: `${agentIdOf(s)} (not installed)` }];
+
+    return `<label class="field">
+      <span class="field-label">Engine</span>
+      <select class="field-input" data-field="agent" data-focus-key="agent">
+        ${options
+          .map(
+            (a) =>
+              `<option value="${esc(a.id)}" ${a.id === agentIdOf(s) ? 'selected' : ''}>${esc(a.label)}</option>`
+          )
+          .join('')}
+      </select>
+    </label>`;
+  }
+
+  /**
+   * The engine's curated list, plus a free-text box. The lists are hand-kept —
+   * neither CLI can enumerate what your account reaches — so anything newer than
+   * this build is typed in, and the host validates it by shape.
+   */
+  function modelField(s) {
+    const models = modelsOf(s);
+    const current = s.model || '';
+    const listed = models.some((m) => m.value === current);
+    const custom = customModel || (!!current && !listed);
+
+    const box = custom
+      ? `<label class="field">
+          <span class="field-label">Model id</span>
+          <input class="field-input" type="text" data-field="customModel" data-focus-key="custom-model"
+            value="${esc(current)}" placeholder="provider/model" spellcheck="false" />
+        </label>`
+      : '';
+
+    return `<label class="field">
+      <span class="field-label">Model</span>
+      <select class="field-input" data-field="model" data-focus-key="model">
+        ${models
+          .map(
+            (m) =>
+              `<option value="${esc(m.value)}" ${!custom && m.value === current ? 'selected' : ''}>${esc(m.label)}</option>`
+          )
+          .join('')}
+        <option value="${CUSTOM_MODEL}" ${custom ? 'selected' : ''}>Custom…</option>
+      </select>
+    </label>
+    ${box}`;
+  }
+
+  function editorSection(s) {
+    // Planning is always a Claude session, whatever the series runs on — so an
+    // opencode model id is not the thing to name here.
+    const pinned = (s && agentIdOf(s) === 'claude' && s.model) || '';
+    const known = modelsOf(s).find((m) => m.value === pinned);
+    const model = pinned ? (known ? known.label : pinned) : 'your default model';
     return `<div class="section">
       <div class="section-head">
         <h3 class="section-title">Plan text</h3>
-        <button class="link-button" type="button" data-action="open-editor">Open in editor ↗</button>
+        <div class="section-actions">
+          <button class="button is-quiet" type="button" data-action="generate-plan"
+            title="Open a terminal running ${esc(model)} in plan mode, and plan from this text">Generate plan</button>
+          <button class="link-button" type="button" data-action="open-editor">Open in editor ↗</button>
+        </div>
       </div>
       <textarea class="editor" data-field="editor" data-focus-key="editor"
         spellcheck="false" aria-label="Plan text"></textarea>
@@ -720,15 +804,8 @@
     if (!area) return;
 
     if (editor.name !== plan.name) {
-      editor = {
-        name: plan.name,
-        text: '',
-        dirty: false,
-        conflict: false,
-        filePath: plan.filePath,
-        external: !!plan.external
-      };
-      send({ type: 'loadPlan', name: plan.name, filePath: plan.filePath, external: !!plan.external });
+      editor = { name: plan.name, text: '', dirty: false, conflict: false };
+      send({ type: 'loadPlan', name: plan.name });
     }
     area.value = editor.text;
     paintEditorStatus();
@@ -755,13 +832,7 @@
   function saveNow() {
     clearTimeout(saveTimer);
     if (!editor.name || !editor.dirty) return;
-    send({
-      type: 'savePlan',
-      name: editor.name,
-      text: editor.text,
-      filePath: editor.filePath,
-      external: editor.external
-    });
+    send({ type: 'savePlan', name: editor.name, text: editor.text });
     editor.dirty = false;
     editor.conflict = false;
     paintEditorStatus();
@@ -799,16 +870,36 @@
   // ---------- events ----------
 
   /** Shared, because the completed plans sit outside the scrolling list. */
-  function selectPlan(e) {
-    const el = /** @type {HTMLElement} */ (e.target).closest('[data-action="select"]');
+  function planClick(e) {
+    const el = /** @type {HTMLElement} */ (e.target).closest('[data-action]');
     if (!el) return;
+    const action = /** @type {HTMLElement} */ (el).dataset.action;
+    const name = /** @type {HTMLElement} */ (el).dataset.name ?? null;
+
+    // A queued save would write the file back moments after the delete removed
+    // it, so a pending edit to this plan is dropped rather than resurrected.
+    if (action === 'remove') {
+      if (editor.name === name) {
+        clearTimeout(saveTimer);
+        editor.dirty = false;
+      }
+      return send({ type: 'deletePlan', name });
+    }
+
+    // The opposite of delete: a rename moves the file, so anything typed has to
+    // reach the old path first or it lands in a file that no longer exists.
+    if (action === 'rename') {
+      saveNow();
+      return send({ type: 'renamePlan', name });
+    }
+
+    if (action !== 'select') return;
     saveNow();
-    selected = /** @type {HTMLElement} */ (el).dataset.name ?? null;
-    render();
+    selectPlan(name);
   }
 
-  listEl.addEventListener('click', selectPlan);
-  completedListEl.addEventListener('click', selectPlan);
+  listEl.addEventListener('click', planClick);
+  completedListEl.addEventListener('click', planClick);
 
   searchEl.addEventListener('input', renderList);
 
@@ -868,8 +959,7 @@
 
     if (action === 'select') {
       saveNow();
-      selected = /** @type {HTMLElement} */ (el).dataset.name ?? null;
-      render();
+      selectPlan(/** @type {HTMLElement} */ (el).dataset.name ?? null);
       return;
     }
 
@@ -903,15 +993,12 @@
     if (!plan) return;
     const series = seriesForPlan(plan);
 
-    if (action === 'open-editor') return send({ type: 'openInEditor', filePath: plan.filePath });
-    if (action === 'schedule') return send({ type: 'schedulePlan', filePath: plan.filePath });
-    if (action === 'duplicate') return send({ type: 'duplicatePlan', name: plan.name });
-    if (action === 'delete') return send({ type: 'deletePlan', name: plan.name });
-
-    if (action === 'rename') {
-      saveNow();
-      return send({ type: 'renamePlan', name: plan.name });
+    if (action === 'open-editor') return send({ type: 'openInEditor', name: plan.name });
+    if (action === 'generate-plan') {
+      saveNow(); // Claude reads the file, so what is on screen must be on disk
+      return send({ type: 'generatePlan', name: plan.name, seriesId: series && series.id });
     }
+    if (action === 'schedule') return send({ type: 'schedulePlan', name: plan.name });
 
     if (runAction(action, runId, series)) return;
     if (!series) return;
@@ -968,7 +1055,28 @@
     }
 
     if (field === 'permissionMode') return patch(series.id, { permissionMode: el.value });
-    if (field === 'model') return patch(series.id, { model: el.value || undefined });
+
+    // A model id belongs to one engine, so switching engines drops one the new
+    // engine has never heard of rather than passing it on to fail at fire time.
+    if (field === 'agent') {
+      const next = state.agents.find((a) => a.id === el.value);
+      const keeps = !!next && next.models.some((m) => m.value === (series.model || ''));
+      customModel = false;
+      return patch(series.id, { agent: el.value, model: keeps ? series.model : undefined });
+    }
+
+    if (field === 'model') {
+      // Custom… is a UI state, not a value: it reveals the box below, and the
+      // box is what patches.
+      if (el.value === CUSTOM_MODEL) {
+        customModel = true;
+        return render();
+      }
+      customModel = false;
+      return patch(series.id, { model: el.value || undefined });
+    }
+
+    if (field === 'customModel') return patch(series.id, { model: el.value.trim() || undefined });
   });
 
   // Blur-save, so switching away never loses an edit.
@@ -1006,6 +1114,14 @@
   }
 
   const patch = (id, p) => send({ type: 'updateSeries', id, patch: p });
+
+  /** Moving to another plan drops the Model field's free-text box, which
+   *  belonged to the plan you were looking at. */
+  function selectPlan(name) {
+    if (name !== selected) customModel = false;
+    selected = name;
+    render();
+  }
 
   function showNotice(text) {
     noticeEl.textContent = text;
@@ -1121,14 +1237,13 @@
         editor.conflict = true;
         paintEditorStatus();
       } else {
-        send({ type: 'loadPlan', name: message.name, filePath: editor.filePath, external: editor.external });
+        send({ type: 'loadPlan', name: message.name });
       }
       return;
     }
 
     if (message.type === 'select') {
-      selected = message.name;
-      render();
+      selectPlan(message.name);
       return;
     }
 

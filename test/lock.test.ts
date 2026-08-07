@@ -18,7 +18,7 @@ let dir: string;
 let file: string;
 
 beforeEach(() => {
-  dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chronus-lock-'));
+  dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chronos-lock-'));
   file = path.join(dir, 'scheduler.lock');
 });
 

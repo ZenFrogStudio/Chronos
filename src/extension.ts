@@ -1,22 +1,24 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { LauncherView, PlanDropController } from './launcher';
+import { AGENTS } from './agents';
+import { consolidate } from './consolidate';
 import { ensureLibrary, seedLibrary } from './library';
-import { initLog, log, pruneLogs } from './log';
+import { initLog, log, logConsolidation, pruneLogs } from './log';
 import { Manager } from './manager';
-import { probeClaude, Runner } from './runner';
+import { probeAgent, Runner } from './runner';
 import { Scheduler } from './scheduler';
 import { StatusItem } from './status';
 import { Store } from './store';
+import { InboxTask, PlanDropController, TaskListView } from './tasks';
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   initLog(context);
-  log.info(`Chronus ${context.extension.packageJSON.version} activating`);
+  log.info(`Chronos ${context.extension.packageJSON.version} activating`);
 
   const store = await Store.create(context.globalState);
   const logDir = path.join(context.globalStorageUri.fsPath, 'logs');
-  pruneLogs(logDir, vscode.workspace.getConfiguration('chronus').get<number>('logRetentionDays', 30));
+  pruneLogs(logDir, vscode.workspace.getConfiguration('chronos').get<number>('logRetentionDays', 30));
 
   const libraryPath = () => resolveLibraryPath(context);
   const resultsPath = () => resolveResultsPath(libraryPath());
@@ -32,17 +34,24 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     log.info('created plan library with a starter plan');
   }
 
+  // Plans scheduled in place by an older version are copied in here, so the rest
+  // of the session can assume every scheduled plan is a library plan.
+  logConsolidation(await consolidate(store, libraryPath()));
+
   const manager = new Manager(context.extensionUri, store, scheduler, libraryPath, resultsPath);
   const status = new StatusItem(store);
 
   // A tree rather than a registered provider, because only `createTreeView`
   // takes a drag-and-drop controller — and this view is the one drop target
   // that works from both the VS Code explorer and the OS shell.
-  const launcher = vscode.window.createTreeView('chronus.launcher', {
-    treeDataProvider: new LauncherView(),
+  const taskList = new TaskListView(libraryPath, manager);
+  const taskView = vscode.window.createTreeView('chronos.tasks', {
+    treeDataProvider: taskList,
     dragAndDropController: new PlanDropController(manager)
   });
-  launcher.message = 'Drop .md files here to schedule them.';
+  // A message rather than `viewsWelcome`: welcome content cannot accept a drop,
+  // and the empty body has to stay a drop target.
+  taskView.message = 'Add a task, or drop .md files here to schedule them.';
 
   context.subscriptions.push(
     store,
@@ -50,17 +59,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     scheduler,
     manager,
     status,
-    launcher,
+    taskList,
+    taskView,
     vscode.window.registerWebviewPanelSerializer(Manager.viewType, {
       // Restores the tab after a window reload instead of holding it in memory.
       async deserializeWebviewPanel(restored: vscode.WebviewPanel) {
         manager.restore(restored);
       }
     }),
-    vscode.commands.registerCommand('chronus.openManager', () => manager.open()),
-    vscode.commands.registerCommand('chronus.addFiles', () => addFiles(manager)),
+    vscode.commands.registerCommand('chronos.openManager', () => manager.open()),
+    vscode.commands.registerCommand('chronos.addFiles', () => addFiles(manager)),
     vscode.commands.registerCommand(
-      'chronus.scheduleFile',
+      'chronos.scheduleFile',
       async (uri?: vscode.Uri, uris?: vscode.Uri[]) => {
         // `explorer/context` passes (clicked, whole selection), but
         // `editor/title/context` passes a menu group reference as the second
@@ -74,26 +84,53 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         await manager.addPaths(paths);
       }
     ),
-    vscode.commands.registerCommand('chronus.showLogs', () => log.show())
+    vscode.commands.registerCommand('chronos.showLogs', () => log.show()),
+    vscode.commands.registerCommand('chronos.addTask', () => taskList.addTask()),
+    vscode.commands.registerCommand('chronos.generatePlan', (task: InboxTask) =>
+      taskList.generatePlan(task)
+    ),
+    vscode.commands.registerCommand('chronos.editTask', (task: InboxTask) =>
+      taskList.editTask(task)
+    ),
+    vscode.commands.registerCommand('chronos.deleteTask', (task: InboxTask) =>
+      taskList.deleteTask(task)
+    )
   );
 
   await scheduler.start();
 
   // Not awaited: activation must not wait on a child process. A bad path should
   // surface here rather than at fire time.
-  const claudePath = vscode.workspace.getConfiguration('chronus').get<string>('claudePath', 'claude');
-  void probeClaude(claudePath).then((problem) => {
-    if (problem) {
-      log.error(`claude pre-flight failed — ${problem}`);
-      manager.setSetupProblem(problem);
+  //
+  // The same probe decides what the manager's Engine dropdown offers, so it
+  // only ever lists engines this machine actually answered on. Claude is the
+  // exception: it stays listed even when broken, because it is the default and
+  // a missing one is a setup problem to fix rather than a choice to withdraw.
+  void Promise.all(
+    AGENTS.map((agent) => probeAgent(agent).then((problem) => ({ agent, problem })))
+  ).then((probes) => {
+    for (const { agent, problem } of probes) {
+      if (!problem) {
+        continue;
+      }
+      if (agent.id === 'claude') {
+        log.error(`claude pre-flight failed — ${problem}`);
+        manager.setSetupProblem(problem);
+      } else {
+        log.info(`${agent.id} is not available, so it is not offered — ${problem}`);
+      }
     }
+
+    manager.setAvailableAgents(
+      probes.filter((p) => !p.problem || p.agent.id === 'claude').map((p) => p.agent.id)
+    );
   });
 
-  log.info('Chronus activated');
+  log.info('Chronos activated');
 }
 
 export function deactivate(): void {
-  log.info('Chronus deactivating');
+  log.info('Chronos deactivating');
 }
 
 /**
@@ -102,7 +139,7 @@ export function deactivate(): void {
  */
 function resolveLibraryPath(context: vscode.ExtensionContext): string {
   const configured = vscode.workspace
-    .getConfiguration('chronus')
+    .getConfiguration('chronos')
     .get<string>('libraryPath', '')
     .trim();
 
@@ -113,11 +150,11 @@ function resolveLibraryPath(context: vscode.ExtensionContext): string {
  * Where run transcripts land. Defaults to a `results` folder beside the plan
  * library rather than to extension storage: these are written to be read, often
  * the next morning and often from a file manager, so they belong somewhere the
- * user can actually find. Point `chronus.resultsPath` elsewhere to move them.
+ * user can actually find. Point `chronos.resultsPath` elsewhere to move them.
  */
 function resolveResultsPath(libraryPath: string): string {
   const configured = vscode.workspace
-    .getConfiguration('chronus')
+    .getConfiguration('chronos')
     .get<string>('resultsPath', '')
     .trim();
 

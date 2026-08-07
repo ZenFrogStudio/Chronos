@@ -1,8 +1,9 @@
-import { Outcome } from './outcome';
+import { Outcome, RunSummary } from './outcome';
 import { withStatus } from './results';
+import { AgentId } from './types';
 
 /**
- * Turning the CLI's NDJSON stream into something a person reads. Pure — no
+ * Turning an engine's NDJSON stream into something a person reads. Pure — no
  * `vscode` import — so both renderings are directly testable.
  *
  * Two outputs come from one parse: ANSI for the live terminal, Markdown for the
@@ -14,6 +15,9 @@ import { withStatus } from './results';
  * unattended, often with permissions wide open; the transcript is the only
  * record of what it actually did, so it deliberately includes tool calls and
  * their targets rather than just the closing message.
+ *
+ * `TranscriptEvent` names nothing vendor-specific, which is what keeps a second
+ * engine cheap: only the parse forks. Every renderer below is shared.
  */
 
 export type TranscriptEvent =
@@ -24,13 +28,14 @@ export type TranscriptEvent =
 
 export interface ParsedLine {
   events: TranscriptEvent[];
-  /** True when this line was a `type: "result"` envelope. */
-  isResult: boolean;
+  /** What this line contributed to the outcome, folded by `foldSummary`. */
+  summary?: Partial<RunSummary>;
 }
 
 export interface TranscriptContext {
   fileName: string;
   cwd: string;
+  engine: string;
   permissionMode: string;
   model?: string;
   startedAt: Date;
@@ -49,6 +54,8 @@ const DETAIL_MAX_CHARS = 200;
 const TOOL_DETAIL_KEYS = [
   'command',
   'file_path',
+  // opencode's own tools spell the same thing in camelCase.
+  'filePath',
   'path',
   'pattern',
   'url',
@@ -56,10 +63,10 @@ const TOOL_DETAIL_KEYS = [
   'query'
 ];
 
-export function parseLine(line: string): ParsedLine {
+export function parseLine(line: string, agent: AgentId = 'claude'): ParsedLine {
   const trimmed = line.trim();
   if (!trimmed.startsWith('{')) {
-    return { events: [], isResult: false };
+    return { events: [] };
   }
 
   let event: any;
@@ -67,13 +74,18 @@ export function parseLine(line: string): ParsedLine {
     event = JSON.parse(trimmed);
   } catch {
     // Progress lines can be truncated mid-stream; ignore and keep scanning.
-    return { events: [], isResult: false };
+    return { events: [] };
   }
 
+  return agent === 'opencode' ? parseOpencodeLine(event) : parseClaudeLine(event);
+}
+
+/** `claude -p --output-format stream-json --verbose`. */
+function parseClaudeLine(event: any): ParsedLine {
   if (event.type === 'system' && event.subtype === 'init') {
     return {
       events: [{ kind: 'session', sessionId: String(event.session_id ?? ''), model: String(event.model ?? '') }],
-      isResult: false
+      summary: { sessionId: text(event.session_id) }
     };
   }
 
@@ -87,24 +99,95 @@ export function parseLine(line: string): ParsedLine {
         events.push({ kind: 'tool', name: String(part.name ?? 'tool'), detail: toolDetail(part.input) });
       }
     }
-    return { events, isResult: false };
+    return { events };
   }
 
+  // One per run, carrying cumulative totals.
   if (event.type === 'result') {
+    const denials = event.permission_denials?.length ?? 0;
     return {
       events: [
         {
           kind: 'result',
           turns: Number(event.num_turns ?? 0),
           costUsd: typeof event.total_cost_usd === 'number' ? event.total_cost_usd : undefined,
-          denials: event.permission_denials?.length ?? 0
+          denials
         }
       ],
-      isResult: true
+      summary: {
+        sessionId: text(event.session_id),
+        costUsd: typeof event.total_cost_usd === 'number' ? event.total_cost_usd : undefined,
+        numTurns: typeof event.num_turns === 'number' ? event.num_turns : undefined,
+        denials,
+        resultText: text(event.result),
+        sawResult: true,
+        isError: event.is_error === true,
+        apiErrorStatus: text(event.api_error_status)
+      }
     };
   }
 
-  return { events: [], isResult: false };
+  return { events: [] };
+}
+
+/**
+ * `opencode run --format json`. Same NDJSON-with-a-`type` shape as Claude's
+ * stream, with the payload one level down in `part` and the totals reported per
+ * step rather than once at the end — which is what `foldSummary` accumulates.
+ *
+ * No `session` event: opencode repeats its `sessionID` on every line and never
+ * names the model, so a session event would be either duplicated or empty. The
+ * id still reaches the summary, and the transcript header states the model.
+ */
+function parseOpencodeLine(event: any): ParsedLine {
+  const part = event.part ?? {};
+  const summary: Partial<RunSummary> = { sessionId: text(event.sessionID) };
+
+  if (event.type === 'text') {
+    const body = String(part.text ?? '').trim();
+    return body ? { events: [{ kind: 'text', text: body }], summary: { ...summary, resultText: body } } : { events: [], summary };
+  }
+
+  if (event.type === 'tool_use') {
+    return {
+      events: [{ kind: 'tool', name: String(part.tool ?? 'tool'), detail: toolDetail(part.state?.input) }],
+      summary
+    };
+  }
+
+  // Emitted per step, so this is a turn. No transcript event: "1 turn" after
+  // every step is noise, and the footer states the totals once.
+  if (event.type === 'step_finish') {
+    return {
+      events: [],
+      summary: {
+        ...summary,
+        numTurns: 1,
+        costUsd: typeof part.cost === 'number' ? part.cost : undefined,
+        sawResult: true
+      }
+    };
+  }
+
+  if (event.type === 'error') {
+    return {
+      events: [],
+      summary: {
+        ...summary,
+        resultText: String(event.error?.data?.message ?? event.error?.name ?? 'opencode reported an error.'),
+        sawResult: true,
+        isError: true
+      }
+    };
+  }
+
+  return { events: [], summary };
+}
+
+/** A non-empty string, or undefined — so `foldSummary` can skip it. */
+function text(value: unknown): string | undefined {
+  const trimmed = value === undefined || value === null ? '' : String(value).trim();
+  return trimmed || undefined;
 }
 
 function toolDetail(input: unknown): string | undefined {
@@ -167,6 +250,7 @@ export function transcriptHeader(context: TranscriptContext): string {
     ['Started', localStamp(context.startedAt)],
     ['Directory', context.cwd],
     ['Permissions', context.permissionMode],
+    ['Engine', context.engine],
     ['Model', context.model || 'default']
   ];
   if (context.attempt > 1) {

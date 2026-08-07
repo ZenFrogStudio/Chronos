@@ -5,13 +5,17 @@ import { nowUtc } from './time';
 import { PermissionMode, TaskSeries } from './types';
 
 /**
- * Full auto, deliberately. Chronus exists to run plans while nobody is at the
- * keyboard, and every gentler mode blocks on a prompt that no one is there to
- * answer — the run then exits 0 having quietly done a fraction of the work.
- * Reviewing the plan before scheduling it is the safety step; a permission
- * dialog fired at 3am is not.
+ * `auto` rather than `bypassPermissions`: a new task gets the CLI's own
+ * judgement about what is safe to do unattended, instead of a blanket waiver.
+ * The old default meant unrestricted tool access on a schedule, and one bad
+ * plan on a recurring series repeats that indefinitely.
+ *
+ * The cost is exactly why it used to be `bypassPermissions`. A mode that can
+ * still stop and ask has nobody to ask at 3am, so a run may end having done
+ * only part of the job. Reviewing the plan before scheduling it is still the
+ * real safety step, and `bypassPermissions` stays one click away per task.
  */
-export const DEFAULT_PERMISSION_MODE: PermissionMode = 'bypassPermissions';
+export const DEFAULT_PERMISSION_MODE: PermissionMode = 'auto';
 
 /**
  * Working directory for the claude process. Prefers the workspace folder that
@@ -40,7 +44,7 @@ export function createSeries(
   filePath: string,
   overrides: Partial<TaskSeries> = {}
 ): TaskSeries {
-  const config = vscode.workspace.getConfiguration('chronus');
+  const config = vscode.workspace.getConfiguration('chronos');
   return {
     id: newId(),
     filePath,

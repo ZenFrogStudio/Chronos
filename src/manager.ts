@@ -3,13 +3,16 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { buildActivity } from './activity';
+import { AGENTS, agentFor, DEFAULT_AGENT } from './agents';
+import { consolidate } from './consolidate';
 import { seriesEdit } from './edit';
 import * as library from './library';
-import { log } from './log';
+import { log, logConsolidation } from './log';
+import { generateCommand, shellKind } from './launch';
 import { Scheduler } from './scheduler';
-import { createSeries } from './series';
+import { createSeries, defaultCwd } from './series';
 import { Store } from './store';
-import { TaskSeries } from './types';
+import { AgentId, TaskSeries } from './types';
 
 /** Messages the webview may send. Anything else is logged and ignored. */
 type Inbound =
@@ -18,17 +21,17 @@ type Inbound =
   | { type: 'dropText'; files: { name: string; text: string }[] }
   | { type: 'createPlan' }
   | { type: 'renamePlan'; name: string }
-  | { type: 'duplicatePlan'; name: string }
   | { type: 'deletePlan'; name: string }
-  | { type: 'loadPlan'; name: string; filePath?: string; external?: boolean }
-  | { type: 'savePlan'; name: string; text: string; filePath?: string; external?: boolean }
-  | { type: 'openInEditor'; filePath: string }
+  | { type: 'loadPlan'; name: string }
+  | { type: 'savePlan'; name: string; text: string }
+  | { type: 'openInEditor'; name: string }
   | { type: 'importPlan' }
   | { type: 'revealLibrary' }
-  | { type: 'schedulePlan'; filePath: string }
+  | { type: 'schedulePlan'; name: string }
   | { type: 'updateSeries'; id: string; patch: Partial<TaskSeries> }
   | { type: 'removeSeries'; id: string }
   | { type: 'browseCwd'; id: string }
+  | { type: 'generatePlan'; name: string; seriesId?: string }
   | { type: 'runNow'; seriesId: string; dismissRunId?: string }
   | { type: 'cancelRun'; id: string }
   | { type: 'dismissRun'; id: string }
@@ -46,18 +49,18 @@ type Inbound =
  * across reloads instead, and re-rendering a list this size is free.
  */
 export class Manager implements vscode.Disposable {
-  static readonly viewType = 'chronus.manager';
+  static readonly viewType = 'chronos.manager';
 
   private panel: vscode.WebviewPanel | undefined;
   private watcher: fs.FSWatcher | undefined;
   private watchDebounce: NodeJS.Timeout | undefined;
-  private externalWatcher: fs.FSWatcher | undefined;
-  private externalDebounce: NodeJS.Timeout | undefined;
-  private externalWatched: string | undefined;
   private readonly storeListener: vscode.Disposable;
   private readonly leadershipListener: vscode.Disposable;
   /** Sticky, unlike a notice: a broken `claudePath` stays broken until fixed. */
   private setupProblem: string | undefined;
+  /** Engines that answered `--version`. Optimistic until the probes land, so
+   *  the dropdown is never briefly empty. */
+  private availableAgents: AgentId[] = [DEFAULT_AGENT];
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -88,11 +91,20 @@ export class Manager implements vscode.Disposable {
 
     const panel = vscode.window.createWebviewPanel(
       Manager.viewType,
-      'Chronus',
+      'Chronos',
       vscode.ViewColumn.Active,
       { enableScripts: true, localResourceRoots: [vscode.Uri.joinPath(this.extensionUri, 'media')] }
     );
     this.adopt(panel);
+  }
+
+  /**
+   * Selects a plan in the library list. Public because the task view calls it
+   * once a generated plan lands, so the pipeline ends where scheduling starts
+   * rather than leaving you to find the new file yourself.
+   */
+  reveal(name: string): void {
+    this.select(name);
   }
 
   /** Survives the panel not being open yet — `post()` replays it on reveal. */
@@ -101,21 +113,43 @@ export class Manager implements vscode.Disposable {
     this.post();
   }
 
+  /** What the Engine dropdown may offer. Set once the probes in `activate` land. */
+  setAvailableAgents(ids: AgentId[]): void {
+    this.availableAgents = ids;
+    this.post();
+  }
+
   /**
-   * Schedules files from any source in place, filtering out non-Markdown. A
-   * dropped file is scheduled where it lies — not copied into the library, which
-   * is what Import does.
+   * Copies Markdown files from any source into the library and schedules the
+   * copies. Every route in — right-click, a drop on the activity-bar view, the
+   * file picker — lands here, so no schedule can point outside the library and
+   * the user's own file is never edited or moved by Chronos.
    */
   async addPaths(filePaths: string[]): Promise<void> {
+    const dir = this.libraryPath();
     const markdown = filePaths.filter((p) => path.extname(p).toLowerCase() === '.md');
     const rejected = filePaths.length - markdown.length;
+    const scheduled: string[] = [];
 
     for (const filePath of markdown) {
-      const series = createSeries(filePath);
+      const plan = library.importFile(dir, filePath);
+      // `defaultCwd` reads the *original* path on purpose: it picks the workspace
+      // folder containing the file, and the copy now sits in global storage where
+      // that lookup would miss. A plan dropped from a project keeps running there.
+      const series = createSeries(plan.filePath, { cwd: defaultCwd(filePath) });
       await this.store.addSeries(series);
-      log.info(`scheduled ${series.fileName} for ${series.nextRunAt} (cwd ${series.cwd})`);
+      log.info(`copied ${filePath} into the library as ${plan.name} and scheduled it (cwd ${series.cwd})`);
+      scheduled.push(plan.title);
     }
 
+    this.post();
+
+    if (scheduled.length) {
+      this.notify(
+        `Copied ${scheduled.join(', ')} into your library and scheduled the copy — ` +
+          'your original file is untouched, and editing it will not change what runs.'
+      );
+    }
     if (rejected > 0) {
       this.notify(`Ignored ${rejected} non-Markdown file${rejected > 1 ? 's' : ''}.`);
     }
@@ -155,9 +189,10 @@ export class Manager implements vscode.Disposable {
   // ---------- library watching ----------
 
   /**
-   * Plans edited outside Chronus must not go stale in the manager. The webview
+   * Plans edited outside Chronos must not go stale in the manager. The webview
    * owns dirty state, so it decides whether to reload — this only reports that
-   * something changed.
+   * something changed. One watcher covers every plan, because every plan lives
+   * in this one folder.
    */
   private startWatching(): void {
     this.stopWatching();
@@ -167,10 +202,16 @@ export class Manager implements vscode.Disposable {
       this.watcher = fs.watch(dir, (_event, filename) => {
         clearTimeout(this.watchDebounce);
         this.watchDebounce = setTimeout(() => {
-          this.post();
-          if (filename && library.isPlanFile(String(filename))) {
-            this.panel?.webview.postMessage({ type: 'planChanged', name: String(filename) });
-          }
+          // Deleting a plan file in a file manager mid-session leaves a schedule
+          // pointing at nothing, which would fire and fail on time forever. One
+          // `existsSync` per series on a debounced event is cheap enough to just
+          // check every time rather than work out which file went.
+          void this.dropSchedulesWithNoFile(dir).then(() => {
+            this.post();
+            if (filename && library.isPlanFile(String(filename))) {
+              this.panel?.webview.postMessage({ type: 'planChanged', name: String(filename) });
+            }
+          });
         }, 150);
       });
     } catch (err) {
@@ -178,48 +219,14 @@ export class Manager implements vscode.Disposable {
     }
   }
 
+  private async dropSchedulesWithNoFile(dir: string): Promise<void> {
+    logConsolidation(await consolidate(this.store, dir));
+  }
+
   private stopWatching(): void {
     clearTimeout(this.watchDebounce);
     this.watcher?.close();
     this.watcher = undefined;
-    this.stopWatchingExternal();
-  }
-
-  /**
-   * An external plan lives outside the library, so the library watcher never
-   * sees it change. Watching its own directory keeps the two-editor conflict
-   * logic working outside the library. Only the open plan is reported.
-   */
-  private watchExternalPlan(filePath: string): void {
-    const dir = path.dirname(filePath);
-    const base = path.basename(filePath);
-    // Keyed by the file, not just its directory: two external plans can share a
-    // directory, and each needs its own basename captured in the watch callback.
-    if (this.externalWatched === filePath && this.externalWatcher) {
-      return;
-    }
-    this.stopWatchingExternal();
-    this.externalWatched = filePath;
-    try {
-      this.externalWatcher = fs.watch(dir, (_event, filename) => {
-        if (!filename || String(filename).toLowerCase() !== base.toLowerCase()) {
-          return;
-        }
-        clearTimeout(this.externalDebounce);
-        this.externalDebounce = setTimeout(() => {
-          this.panel?.webview.postMessage({ type: 'planChanged', name: base });
-        }, 150);
-      });
-    } catch (err) {
-      log.warn(`could not watch external plan directory: ${String(err)}`);
-    }
-  }
-
-  private stopWatchingExternal(): void {
-    clearTimeout(this.externalDebounce);
-    this.externalWatcher?.close();
-    this.externalWatcher = undefined;
-    this.externalWatched = undefined;
   }
 
   // ---------- messages ----------
@@ -289,45 +296,26 @@ export class Manager implements vscode.Disposable {
         return;
       }
 
-      case 'duplicatePlan': {
-        const copy = library.duplicatePlan(dir, message.name);
-        this.post();
-        this.select(copy.name);
-        return;
-      }
-
       case 'deletePlan':
         return this.deletePlan(dir, message.name);
 
       case 'loadPlan':
-        if (message.external && message.filePath) {
-          if (!this.isScheduledPlan(message.filePath)) {
-            return this.refuseExternal(message.filePath);
-          }
-          this.watchExternalPlan(message.filePath);
-          this.sendText(dir, message.name, message.filePath);
-        } else {
-          this.sendText(dir, message.name);
-        }
+        this.sendText(dir, message.name);
         return;
 
       case 'savePlan':
-        if (message.external && message.filePath) {
-          if (!this.isScheduledPlan(message.filePath)) {
-            return this.refuseExternal(message.filePath);
-          }
-          library.writePlanAt(message.filePath, message.text);
-        } else {
-          library.writePlan(dir, message.name, message.text);
-        }
+        library.writePlan(dir, message.name, message.text);
         return;
 
       case 'openInEditor': {
-        if (!fs.existsSync(message.filePath)) {
+        // `planPath` rather than a path from the webview: a name is the only way
+        // in, and it is checked here the same as on every read and write.
+        const filePath = library.planPath(dir, message.name);
+        if (!fs.existsSync(filePath)) {
           this.notify('That file no longer exists.');
           return;
         }
-        await vscode.window.showTextDocument(vscode.Uri.file(message.filePath), {
+        await vscode.window.showTextDocument(vscode.Uri.file(filePath), {
           viewColumn: vscode.ViewColumn.Beside
         });
         return;
@@ -340,8 +328,7 @@ export class Manager implements vscode.Disposable {
           filters: { Markdown: ['md'] }
         });
         for (const uri of picked ?? []) {
-          const title = path.basename(uri.fsPath, path.extname(uri.fsPath));
-          library.createPlan(dir, title, fs.readFileSync(uri.fsPath, 'utf8'));
+          library.importFile(dir, uri.fsPath);
         }
         this.post();
         return;
@@ -352,7 +339,7 @@ export class Manager implements vscode.Disposable {
         return;
 
       case 'schedulePlan': {
-        const series = createSeries(message.filePath);
+        const series = createSeries(library.planPath(dir, message.name));
         await this.store.addSeries(series);
         log.info(`scheduled ${series.fileName} for ${series.nextRunAt}`);
         return;
@@ -390,10 +377,13 @@ export class Manager implements vscode.Disposable {
         return;
       }
 
+      case 'generatePlan':
+        return this.generatePlan(library.planPath(dir, message.name), message.seriesId);
+
       case 'runNow':
         if (!this.scheduler.leading) {
           this.notify(
-            'Another VS Code window is running the Chronus scheduler. Use that window, or close it.'
+            'Another VS Code window is running the Chronos scheduler. Use that window, or close it.'
           );
           return;
         }
@@ -447,21 +437,52 @@ export class Manager implements vscode.Disposable {
     }
   }
 
-  private isScheduledPlan(filePath: string): boolean {
-    return library.isScheduledPlan(
-      this.store.getSeries().map((s) => s.filePath),
-      filePath
-    );
-  }
+  /**
+   * Opens an interactive plan-mode session on a plan file. A real terminal, not
+   * the runner's read-only pty — the point is to talk to Claude — so this is
+   * outside the scheduler entirely: no concurrency slot, no run record, no
+   * transcript.
+   */
+  private async generatePlan(filePath: string, seriesId?: string): Promise<void> {
+    if (!fs.existsSync(filePath)) {
+      return this.notify('That file no longer exists.');
+    }
+    if (!fs.readFileSync(filePath, 'utf8').trim()) {
+      return this.notify('This plan is empty. Write what you want Claude to plan from first.');
+    }
 
-  private refuseExternal(filePath: string): void {
-    log.warn(`refused an external plan path that is not scheduled: ${filePath}`);
-    this.notify('That file is not a scheduled plan — Chronus will not read or write it.');
+    const series = seriesId ? this.store.getSeriesById(seriesId) : undefined;
+    const cwd = series && fs.existsSync(series.cwd) ? series.cwd : defaultCwd(filePath);
+
+    const command = generateCommand({
+      exe: vscode.workspace
+        .getConfiguration('chronos')
+        .get<string>('claudePath', 'claude'),
+      sourcePath: filePath,
+      allowDir: path.dirname(filePath),
+      // Planning is always a Claude session, so a series pinned to another
+      // engine contributes no model — its id would mean nothing to `claude`.
+      model: agentFor(series?.agent).id === 'claude' ? series?.model : undefined,
+      shell: shellKind(vscode.env.shell, process.platform)
+    });
+
+    const terminal = vscode.window.createTerminal({
+      name: `Chronos: plan ${path.basename(filePath, '.md')}`,
+      cwd,
+      iconPath: new vscode.ThemeIcon('lightbulb')
+    });
+    // Focus, unlike a scheduled run: you pressed a button and are about to type.
+    terminal.show();
+    terminal.sendText(command);
+    log.info(`opened a planning session for ${path.basename(filePath)} in ${cwd}`);
   }
 
   /**
-   * Deleting a plan that something is scheduled to run is destructive in a way
-   * the user cannot see from the file list, so it asks first.
+   * Always asks, and says plainly that the file goes for good — `removePlan`
+   * unlinks rather than recycling, and this is reachable from a hover-height X
+   * on a list row, where a misclick costs the file. A scheduled plan asks a
+   * second question on top: its schedule is destroyed too, and that is not
+   * something the file list shows.
    */
   private async deletePlan(dir: string, name: string): Promise<void> {
     const filePath = path.join(dir, name);
@@ -472,7 +493,7 @@ export class Manager implements vscode.Disposable {
     if (scheduled.length > 0) {
       const choice = await vscode.window.showWarningMessage(
         `"${name}" is scheduled. Delete the plan and its schedule?`,
-        { modal: true },
+        { modal: true, detail: 'The file is deleted, not moved to the recycle bin.' },
         'Delete both',
         'Delete plan only'
       );
@@ -483,6 +504,15 @@ export class Manager implements vscode.Disposable {
         for (const series of scheduled) {
           await this.store.removeSeries(series.id);
         }
+      }
+    } else {
+      const choice = await vscode.window.showWarningMessage(
+        `Delete "${name}"?`,
+        { modal: true, detail: 'The file is deleted, not moved to the recycle bin.' },
+        'Delete'
+      );
+      if (!choice) {
+        return;
       }
     }
 
@@ -509,9 +539,9 @@ export class Manager implements vscode.Disposable {
     this.panel?.webview.postMessage({ type: 'notice', text });
   }
 
-  private sendText(dir: string, name: string, externalPath?: string): void {
+  private sendText(dir: string, name: string): void {
     try {
-      const text = externalPath ? library.readPlanAt(externalPath) : library.readPlan(dir, name);
+      const text = library.readPlan(dir, name);
       this.panel?.webview.postMessage({ type: 'planText', name, text });
     } catch (err) {
       this.notify(`Could not read ${name}: ${String(err)}`);
@@ -524,30 +554,22 @@ export class Manager implements vscode.Disposable {
     }
 
     const dir = this.libraryPath();
-    const plans = library.listPlans(dir);
-    const inLibrary = new Set(plans.map((p) => p.filePath.toLowerCase()));
-
-    // Series pointing at files outside the library still belong in the list —
-    // they are scheduled work, and hiding them would make them unmanageable.
-    const external = this.store
-      .getSeries()
-      .filter((s) => !inLibrary.has(s.filePath.toLowerCase()))
-      .map((s) => ({
-        name: s.fileName,
-        filePath: s.filePath,
-        title: s.fileName.replace(/\.md$/i, ''),
-        external: true
-      }));
 
     this.panel.webview.postMessage({
       type: 'state',
       libraryPath: dir,
       resultsPath: this.resultsPath(),
-      plans,
-      external: dedupeByPath(external),
+      // One list, because there is one kind of plan: `consolidate` guarantees
+      // every series points at a file in this folder.
+      plans: library.listPlans(dir),
       series: this.store.getSeries(),
       runs: this.store.getRuns(),
       activity: buildActivity(this.store.getSeries(), this.store.getRuns(), Date.now()),
+      // Sent rather than hard-coded in the webview: the task view's model picker
+      // reads the same table, and two copies would drift the next time a model
+      // ships. Only engines this machine answered on are included, so the
+      // dropdown cannot offer something that would fail at fire time.
+      agents: AGENTS.filter((agent) => this.availableAgents.includes(agent.id)),
       costLast7Days: this.store.costLast7Days(),
       setupProblem: this.setupProblem,
       schedulerElsewhere: !this.scheduler.leading
@@ -565,6 +587,7 @@ export class Manager implements vscode.Disposable {
       .replaceAll('{{nonce}}', createNonce())
       .replaceAll('{{cspSource}}', webview.cspSource)
       .replaceAll('{{styleUri}}', mediaUri('manager.css'))
+      .replaceAll('{{codiconUri}}', mediaUri('codicon.css'))
       .replaceAll('{{scriptUri}}', mediaUri('manager.js'));
   }
 }
@@ -583,18 +606,6 @@ function askForTitle(prompt: string, value: string): Thenable<string | undefined
     value,
     validateInput: (input) =>
       input.trim() ? undefined : 'Give the plan a name.'
-  });
-}
-
-function dedupeByPath<T extends { filePath: string }>(items: T[]): T[] {
-  const seen = new Set<string>();
-  return items.filter((item) => {
-    const key = item.filePath.toLowerCase();
-    if (seen.has(key)) {
-      return false;
-    }
-    seen.add(key);
-    return true;
   });
 }
 

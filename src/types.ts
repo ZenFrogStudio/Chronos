@@ -1,3 +1,10 @@
+/**
+ * The coding CLI a task runs through. Absent on a series means `claude`, which
+ * is what every series stored before engines existed meant — so adding this
+ * needed no migration and no SCHEMA_VERSION bump.
+ */
+export type AgentId = 'claude' | 'opencode';
+
 /** Permission modes accepted by the `claude` CLI's --permission-mode flag. */
 export type PermissionMode =
   | 'acceptEdits'
@@ -35,9 +42,11 @@ export interface TaskSeries {
   filePath: string;
   /** Basename, for display only. */
   fileName: string;
-  /** Working directory for the claude process. */
+  /** Working directory for the agent process. */
   cwd: string;
   permissionMode: PermissionMode;
+  /** Absent means `claude`. See `AgentId`. */
+  agent?: AgentId;
   model?: string;
   /** null = one-shot. */
   recurrence: Recurrence | null;
@@ -98,7 +107,7 @@ export interface TaskRun {
   authFailure?: boolean;
 }
 
-export interface ChronusState {
+export interface ChronosState {
   schemaVersion: number;
   series: TaskSeries[];
   runs: TaskRun[];
@@ -109,7 +118,7 @@ export interface ChronusState {
  * versions; it does not discard them.
  */
 export const SCHEMA_VERSION = 3;
-export const STORE_KEY = 'chronus.state';
+export const STORE_KEY = 'chronos.state';
 
 /** Scheduler tick. A gap larger than 3x this means the process was suspended. */
 export const TICK_MS = 30_000;

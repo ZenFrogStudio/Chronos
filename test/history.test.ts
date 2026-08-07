@@ -4,7 +4,7 @@ import { pruneRuns } from '../src/history';
 import { MAX_MISSED_RUNS, MAX_RECENT_RUNS, RunStatus, TaskRun } from '../src/types';
 
 /**
- * The only place Chronus deletes something the user might still want, so the
+ * The only place Chronos deletes something the user might still want, so the
  * rules are asserted rather than assumed.
  */
 

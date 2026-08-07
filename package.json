@@ -1,9 +1,9 @@
 {
-  "name": "chronus",
-  "displayName": "Chronus",
+  "name": "chronos",
+  "displayName": "Chronos",
   "description": "Schedule Claude Code tasks from Markdown plan files.",
-  "version": "0.8.0-rc.7",
-  "publisher": "onemedialabs",
+  "version": "0.8.0-rc.18",
+  "publisher": "Z3n",
   "license": "MIT",
   "icon": "media/icon.png",
   "engines": {
@@ -26,128 +26,229 @@
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "chronus",
-          "title": "Chronus",
-          "icon": "media/chronus.svg"
+          "id": "chronos",
+          "title": "Chronos",
+          "icon": "media/chronos.svg"
         }
       ]
     },
     "views": {
-      "chronus": [
+      "chronos": [
         {
-          "id": "chronus.launcher",
-          "name": "Chronus"
+          "id": "chronos.tasks",
+          "name": "Tasks"
         }
       ]
     },
     "commands": [
       {
-        "command": "chronus.openManager",
-        "title": "Chronus: Open Manager",
+        "command": "chronos.openManager",
+        "title": "Chronos: Open Manager",
         "icon": "$(multiple-windows)"
       },
       {
-        "command": "chronus.addFiles",
-        "title": "Chronus: Schedule Markdown File...",
+        "command": "chronos.addFiles",
+        "title": "Chronos: Schedule Markdown File...",
         "icon": "$(add)"
       },
       {
-        "command": "chronus.scheduleFile",
-        "title": "Schedule with Chronus"
+        "command": "chronos.scheduleFile",
+        "title": "Schedule with Chronos"
       },
       {
-        "command": "chronus.showLogs",
-        "title": "Chronus: Show Logs"
+        "command": "chronos.showLogs",
+        "title": "Chronos: Show Logs"
+      },
+      {
+        "command": "chronos.addTask",
+        "title": "Chronos: Add Task",
+        "icon": "$(add)"
+      },
+      {
+        "command": "chronos.generatePlan",
+        "title": "Generate plan...",
+        "icon": "$(lightbulb)"
+      },
+      {
+        "command": "chronos.editTask",
+        "title": "Edit Task",
+        "icon": "$(pencil)"
+      },
+      {
+        "command": "chronos.deleteTask",
+        "title": "Delete Task",
+        "icon": "$(trash)"
       }
     ],
     "menus": {
+      "view/title": [
+        {
+          "command": "chronos.addTask",
+          "when": "view == chronos.tasks",
+          "group": "navigation@1"
+        },
+        {
+          "command": "chronos.openManager",
+          "when": "view == chronos.tasks",
+          "group": "navigation@2"
+        },
+        {
+          "command": "chronos.addFiles",
+          "when": "view == chronos.tasks"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "chronos.generatePlan",
+          "when": "view == chronos.tasks && viewItem == task",
+          "group": "inline@1"
+        },
+        {
+          "command": "chronos.editTask",
+          "when": "view == chronos.tasks && viewItem == task",
+          "group": "inline@2"
+        },
+        {
+          "command": "chronos.deleteTask",
+          "when": "view == chronos.tasks && viewItem == task",
+          "group": "inline@3"
+        },
+        {
+          "command": "chronos.generatePlan",
+          "when": "view == chronos.tasks && viewItem == task"
+        }
+      ],
       "explorer/context": [
         {
-          "command": "chronus.scheduleFile",
+          "command": "chronos.scheduleFile",
           "when": "resourceExtname == .md",
           "group": "7_modification"
         }
       ],
       "editor/title/context": [
         {
-          "command": "chronus.scheduleFile",
+          "command": "chronos.scheduleFile",
           "when": "resourceExtname == .md",
-          "group": "1_chronus"
+          "group": "1_chronos"
         }
       ],
       "commandPalette": [
         {
-          "command": "chronus.scheduleFile",
+          "command": "chronos.scheduleFile",
+          "when": "false"
+        },
+        {
+          "command": "chronos.generatePlan",
+          "when": "false"
+        },
+        {
+          "command": "chronos.editTask",
+          "when": "false"
+        },
+        {
+          "command": "chronos.deleteTask",
           "when": "false"
         }
       ]
     },
     "configuration": {
-      "title": "Chronus",
+      "title": "Chronos",
       "properties": {
-        "chronus.claudePath": {
+        "chronos.claudePath": {
           "type": "string",
           "default": "claude",
           "markdownDescription": "Path to the `claude` executable. Leave as `claude` to resolve from PATH."
         },
-        "chronus.libraryPath": {
+        "chronos.opencodePath": {
+          "type": "string",
+          "default": "opencode",
+          "markdownDescription": "Path to the `opencode` executable, used by tasks whose **Engine** is set to opencode. Leave as `opencode` to resolve from PATH. If it does not answer `--version` on startup, opencode is simply not offered as an engine — it is not an error. opencode keeps its own provider logins; run `opencode providers login` to reach anything beyond its free hosted models."
+        },
+        "chronos.libraryPath": {
           "type": "string",
           "default": "",
-          "markdownDescription": "Folder holding your plan library. Leave empty to use Chronus's own storage. Changing this does not move existing plans; already-scheduled tasks keep working either way, since they store absolute paths."
+          "markdownDescription": "Folder holding your plan library. Leave empty to use Chronos's own storage. Changing this does not move existing plans; already-scheduled tasks keep working either way, since they store absolute paths."
         },
-        "chronus.resultsPath": {
+        "chronos.resultsPath": {
           "type": "string",
           "default": "",
           "markdownDescription": "Folder for run transcripts — one subfolder per plan, one Markdown file per run. Leave empty to use a `results` folder beside your plan library. These are never deleted automatically, unlike raw logs."
         },
-        "chronus.showTerminalOnRun": {
+        "chronos.planModel": {
+          "type": "string",
+          "default": "",
+          "enum": [
+            "",
+            "claude-opus-5",
+            "claude-opus-4-8",
+            "claude-sonnet-5",
+            "claude-haiku-4-5-20251001",
+            "claude-fable-5",
+            "opus",
+            "sonnet",
+            "haiku"
+          ],
+          "enumDescriptions": [
+            "Account default",
+            "Opus 5",
+            "Opus 4.8",
+            "Sonnet 5",
+            "Haiku 4.5",
+            "Fable 5",
+            "Opus (latest)",
+            "Sonnet (latest)",
+            "Haiku (latest)"
+          ],
+          "markdownDescription": "Model used when generating a plan from a task in the **Tasks** view. Chosen from a dropdown each time you press **Generate plan**; this remembers your last choice. It does not affect scheduled runs, which use each plan's own model."
+        },
+        "chronos.showTerminalOnRun": {
           "type": "boolean",
           "default": true,
           "description": "Reveal the terminal panel when a task starts. Focus is left where it is. Turn off if scheduled runs interrupt you."
         },
-        "chronus.maxConcurrent": {
+        "chronos.maxConcurrent": {
           "type": "number",
           "default": 1,
           "minimum": 1,
           "maximum": 5,
           "description": "Maximum number of tasks running at once. Raise deliberately: parallel agents editing one repository will collide."
         },
-        "chronus.maxRetries": {
+        "chronos.maxRetries": {
           "type": "number",
           "default": 3,
           "minimum": 0,
           "maximum": 10,
           "description": "Retry attempts after a failed run before the task is given up on."
         },
-        "chronus.retryDelayMinutes": {
+        "chronos.retryDelayMinutes": {
           "type": "number",
           "default": 60,
           "minimum": 1,
           "description": "Delay before retrying a failed run."
         },
-        "chronus.graceWindowMinutes": {
+        "chronos.graceWindowMinutes": {
           "type": "number",
           "default": 15,
           "minimum": 0,
           "description": "How late a task may fire and still run. Beyond this it is marked missed and waits for your decision instead of running unattended."
         },
-        "chronus.idleTimeoutMinutes": {
+        "chronos.idleTimeoutMinutes": {
           "type": "number",
           "default": 15,
           "minimum": 1,
           "description": "Kill a run that produces no output for this long."
         },
-        "chronus.maxRuntimeMinutes": {
+        "chronos.maxRuntimeMinutes": {
           "type": "number",
           "default": 60,
           "minimum": 1,
           "description": "Hard wall-clock ceiling on a single run."
         },
-        "chronus.logRetentionDays": {
+        "chronos.logRetentionDays": {
           "type": "number",
           "default": 30,
           "minimum": 1,
-          "markdownDescription": "Delete raw run logs older than this on startup. This does not touch the Markdown transcripts in `chronus.resultsPath`, which are kept indefinitely."
+          "markdownDescription": "Delete raw run logs older than this on startup. This does not touch the Markdown transcripts in `chronos.resultsPath`, which are kept indefinitely."
         }
       }
     }
@@ -164,6 +265,7 @@
   "devDependencies": {
     "@types/node": "^20.14.0",
     "@types/vscode": "^1.93.0",
+    "@vscode/codicons": "^0.0.46-24",
     "esbuild": "^0.28.1",
     "typescript": "^5.5.0"
   }

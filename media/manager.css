@@ -1,5 +1,5 @@
-/* Chronus manager. The shell is derived from VS Code theme vars so it adapts to
-   any theme. Chronus owns one colour — sodium — spent only on liveness and
+/* Chronos manager. The shell is derived from VS Code theme vars so it adapts to
+   any theme. Chronos owns one colour — sodium — spent only on liveness and
    imminence. Global values only — no component tokens. */
 
 :root {
@@ -39,6 +39,19 @@ body {
   background: var(--vscode-editor-background);
   font-family: var(--vscode-font-family);
   font-size: var(--vscode-font-size);
+  /* The date picker and the repeat dropdown are browser chrome: they are drawn
+     outside the page and no selector reaches inside them. This is the one lever
+     that does — it decides whether Chromium paints those popups, and the native
+     scrollbars, dark or light. Without it a white calendar opens over a dark
+     editor. Declared here so every control inherits it. */
+  color-scheme: dark;
+}
+
+/* Both light themes. HC light carries vscode-high-contrast-light; plain light
+   carries vscode-light. Neither implies the other, so both are named. */
+body.vscode-light,
+body.vscode-high-contrast-light {
+  color-scheme: light;
 }
 
 /* The two-typeface rule: prose is set in the UI font, every measurement — time,
@@ -48,6 +61,7 @@ body {
 .library-title,
 .section-title,
 .field-label,
+.field-input[type="datetime-local"],
 .plan-meta,
 .detail-path,
 .path-value,
@@ -180,10 +194,67 @@ body.dragging .drop-overlay {
   color: var(--muted);
 }
 
+/* The row actions are laid over the row rather than beside it, so adding them
+   does not change how a plan name is measured or where it truncates. */
+.plan-row {
+  position: relative;
+}
+
+.plan-actions {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  transform: translateY(-50%);
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 200ms ease-in-out;
+}
+
+/* Hidden until wanted, but never hidden from the keyboard, and always shown on
+   the selected row — that is the one you are working with. */
+.plan-row:hover .plan-actions,
+.plan-item.is-selected ~ .plan-actions,
+.plan-actions:focus-within {
+  opacity: 1;
+}
+
+.plan-action {
+  width: 17px;
+  height: 17px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.95em;
+  line-height: 1;
+  cursor: pointer;
+  transition: color 200ms ease-in-out, background 200ms ease-in-out;
+}
+
+.plan-action:hover {
+  background: var(--raised);
+  color: var(--vscode-foreground);
+}
+
+.plan-action.is-danger:hover {
+  background: color-mix(in srgb, var(--danger) 22%, transparent);
+  color: var(--danger);
+}
+
+.plan-action:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* The right padding is the action buttons' lane: a long title must ellipsise
+   before it reaches them rather than run underneath. */
 .plan-item {
   display: block;
   width: 100%;
-  padding: 6px 8px;
+  padding: 6px 44px 6px 8px;
   border: 1px solid transparent;
   border-radius: var(--radius);
   background: none;
@@ -257,13 +328,38 @@ body.dragging .drop-overlay {
   overflow-y: auto;
 }
 
+/* Two rarely-used utility actions, reduced to codicons on one row: they belong
+   at hand but not in the eye. */
 .library-foot {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  padding: 8px 12px;
+  gap: 4px;
+  padding: 6px 10px;
   border-top: 1px solid var(--border);
+}
+
+.foot-action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color 200ms ease-in-out, background 200ms ease-in-out;
+}
+
+.foot-action:hover {
+  background: var(--raised);
+  color: var(--vscode-foreground);
+}
+
+.foot-action:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
 }
 
 /* --- Detail head --- */
@@ -388,6 +484,12 @@ body.dragging .drop-overlay {
   margin: 0;
 }
 
+.section-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -414,6 +516,45 @@ select.field-input {
   background: var(--vscode-input-background);
   color: var(--vscode-input-foreground);
   font: inherit;
+}
+
+/* --- The when field ---
+   The popup itself is out of reach (see color-scheme on body), but the control
+   that opens it is not, and it is what you look at the other 99% of the time. */
+
+/* Nothing between the segments should read as punctuation you could edit. */
+.field-input::-webkit-datetime-edit-text {
+  padding: 0 1px;
+  color: var(--muted);
+}
+
+/* The segment being edited, in the one colour Chronos spends on time. The
+   browser default is the OS selection blue, which belongs to no theme here. */
+.field-input::-webkit-datetime-edit-year-field:focus,
+.field-input::-webkit-datetime-edit-month-field:focus,
+.field-input::-webkit-datetime-edit-day-field:focus,
+.field-input::-webkit-datetime-edit-hour-field:focus,
+.field-input::-webkit-datetime-edit-minute-field:focus,
+.field-input::-webkit-datetime-edit-ampm-field:focus {
+  border-radius: 3px;
+  outline: none;
+  background: color-mix(in srgb, var(--sodium) 30%, transparent);
+  color: var(--vscode-foreground);
+}
+
+/* The calendar glyph, muted like every other affordance in the manager and lit
+   on hover — the same move the sidebar row actions make. */
+.field-input::-webkit-calendar-picker-indicator {
+  padding: 2px;
+  border-radius: 3px;
+  cursor: pointer;
+  opacity: 0.5;
+  transition: opacity 200ms ease-in-out, background 200ms ease-in-out;
+}
+
+.field-input::-webkit-calendar-picker-indicator:hover {
+  opacity: 1;
+  background: var(--raised);
 }
 
 .field.is-spaced {

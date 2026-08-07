@@ -2,7 +2,7 @@ import { MAX_MISSED_RUNS, MAX_RECENT_RUNS, TaskRun, isFinished } from './types';
 
 /**
  * How much run history is kept. Pure — no `vscode`, no store — because this is
- * the one place Chronus deletes something the user might still want, and that
+ * the one place Chronos deletes something the user might still want, and that
  * rule should be a test rather than a hope.
  *
  * The store lives in `globalState`, so it cannot grow forever: a daily series

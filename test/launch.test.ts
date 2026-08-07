@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { buildArgs, preflightError } from '../src/launch';
-import { PermissionMode } from '../src/types';
+import { buildArgs, generateCommand, preflightError, shellKind, Shell } from '../src/launch';
+import { AgentId, PermissionMode } from '../src/types';
 
 const PLAN = 'D:\\plans\\refactor.md';
 const CWD = 'D:\\repo';
@@ -11,6 +11,11 @@ const launchable = (permissionMode: PermissionMode = 'acceptEdits', model?: stri
   cwd: CWD,
   permissionMode,
   model
+});
+
+const onEngine = (agent: AgentId, permissionMode: PermissionMode = 'acceptEdits', model?: string) => ({
+  ...launchable(permissionMode, model),
+  agent
 });
 
 /** Everything present and readable, unless a test says otherwise. */
@@ -56,6 +61,214 @@ describe('buildArgs', () => {
     const args = buildArgs(launchable('acceptEdits', 'opus'));
 
     assert.ok(!args.some((arg) => arg.includes(PLAN)));
+  });
+
+  it('should_treat_a_series_with_no_engine_as_a_claude_series', () => {
+    // What every series stored before engines existed means, which is why
+    // adding the field needed no migration.
+    assert.deepEqual(buildArgs(launchable()), buildArgs(onEngine('claude')));
+  });
+});
+
+describe('buildArgs — opencode', () => {
+  it('should_ask_for_the_ndjson_stream_the_transcript_is_parsed_from', () => {
+    const args = buildArgs(onEngine('opencode'));
+
+    assert.deepEqual(args.slice(0, 3), ['run', '--format', 'json']);
+  });
+
+  it('should_name_the_working_directory_rather_than_relying_on_the_process_cwd', () => {
+    // opencode runs its tools through a server of its own that resolves the
+    // project root independently, so it does not inherit the spawned process's
+    // working directory. Without --dir a task pointed at one repo edits
+    // whichever repo opencode picked — with permissions wide open.
+    const args = buildArgs(onEngine('opencode'));
+
+    assert.equal(args[args.indexOf('--dir') + 1], CWD);
+  });
+
+  it('should_never_emit_a_claude_flag', () => {
+    // The two CLIs share a stream shape, not a command line.
+    const args = buildArgs(onEngine('opencode', 'bypassPermissions', 'opencode/big-pickle'));
+
+    for (const flag of ['-p', '--output-format', '--verbose', '--permission-mode', '--model']) {
+      assert.ok(!args.includes(flag), `${flag} means nothing to opencode`);
+    }
+  });
+
+  it('should_auto_approve_for_every_mode_that_means_do_not_stop_and_ask', () => {
+    // opencode has one approval control where Claude has six. Without --auto an
+    // unattended run blocks on a prompt nobody is awake to answer.
+    for (const mode of ['acceptEdits', 'auto', 'bypassPermissions', 'dontAsk'] as PermissionMode[]) {
+      assert.ok(buildArgs(onEngine('opencode', mode)).includes('--auto'), mode);
+    }
+  });
+
+  it('should_withhold_auto_approval_in_plan_and_manual_modes', () => {
+    for (const mode of ['plan', 'manual'] as PermissionMode[]) {
+      assert.ok(!buildArgs(onEngine('opencode', mode)).includes('--auto'), mode);
+    }
+  });
+
+  it('should_pin_the_model_with_opencodes_own_flag', () => {
+    const args = buildArgs(onEngine('opencode', 'auto', 'opencode/north-mini-code-free'));
+
+    assert.equal(args[args.indexOf('-m') + 1], 'opencode/north-mini-code-free');
+  });
+
+  it('should_omit_the_model_flag_when_no_model_is_pinned', () => {
+    assert.ok(!buildArgs(onEngine('opencode')).includes('-m'));
+  });
+
+  it('should_never_place_the_prompt_on_the_command_line', () => {
+    // `opencode run --format json` reads its prompt from stdin, same as claude.
+    const args = buildArgs(onEngine('opencode', 'auto', 'opencode/big-pickle'));
+
+    assert.ok(!args.some((arg) => arg.includes(PLAN)));
+  });
+
+  it('should_pass_a_working_directory_containing_spaces_as_one_argument', () => {
+    // `runner.ts` quotes every argv entry on Windows for exactly this — under
+    // `shell: true` Node quotes nothing, so an unquoted path would arrive as
+    // three arguments.
+    const spaced = 'C:\\My Projects\\site';
+    const args = buildArgs({ ...onEngine('opencode'), cwd: spaced });
+
+    assert.equal(args[args.indexOf('--dir') + 1], spaced);
+  });
+});
+
+const TASK = 'D:\\plans\\tasks\\refactor-the-auth-module.md';
+const LIBRARY = 'D:\\plans';
+
+const generatable = (overrides: Partial<Parameters<typeof generateCommand>[0]> = {}) => ({
+  exe: 'claude',
+  sourcePath: PLAN,
+  allowDir: LIBRARY,
+  shell: 'posix' as Shell,
+  ...overrides
+});
+
+describe('generateCommand', () => {
+  it('should_name_the_source_file_rather_than_carrying_its_text', () => {
+    const command = generateCommand(generatable());
+
+    // The source is named, not pasted: a task can grow past one line, a plan body
+    // can be tens of kilobytes, and neither survives a shell prompt.
+    assert.ok(command.includes(PLAN), 'Claude is told which file to read');
+    assert.ok(!command.includes('\n'), 'a multi-line body would break the command');
+  });
+
+  it('should_write_the_plan_somewhere_other_than_the_task_file', () => {
+    // The task view's whole point: a one-line task must never be the thing that
+    // gets overwritten by the plan generated from it.
+    const destPath = 'D:\\plans\\refactor-the-auth-module.md';
+    const command = generateCommand(generatable({ sourcePath: TASK, destPath }));
+
+    assert.ok(command.includes(`write the approved plan to ${destPath}`));
+    assert.ok(!command.includes(`write the approved plan to ${TASK}`));
+  });
+
+  it('should_overwrite_the_source_when_no_destination_is_given', () => {
+    // The manager's own button re-plans a library plan in place.
+    const command = generateCommand(generatable());
+
+    assert.ok(command.includes('overwrite that same file'));
+  });
+
+  it('should_always_plan_regardless_of_any_other_permission_mode', () => {
+    // The series may be set to bypassPermissions; this writes a plan, it does
+    // not carry one out.
+    const command = generateCommand(generatable());
+
+    assert.ok(command.includes('--permission-mode plan'));
+    assert.ok(!command.includes('--allow-dangerously-skip-permissions'));
+  });
+
+  it('should_omit_the_model_flag_when_no_model_is_pinned', () => {
+    assert.ok(!generateCommand(generatable()).includes('--model'));
+  });
+
+  it('should_pin_the_model_when_one_is_chosen', () => {
+    assert.ok(generateCommand(generatable({ model: 'opus' })).includes('--model opus'));
+  });
+
+  it('should_grant_access_to_the_library_that_holds_both_paths', () => {
+    // The working directory is the repo; both the task and its destination live
+    // in the library, outside it. One grant covers both, because `tasks/` is
+    // inside the library — without it Claude can neither read nor write.
+    const command = generateCommand(generatable({ sourcePath: TASK, destPath: PLAN }));
+
+    assert.equal(command.match(/--add-dir/g)?.length, 1);
+    assert.ok(command.includes(`--add-dir '${LIBRARY}'`));
+  });
+
+  it('should_quote_a_path_containing_spaces_for_each_shell', () => {
+    const spaced = 'C:\\My Plans';
+    const quoted: Record<Shell, string> = {
+      powershell: `--add-dir '${spaced}'`,
+      cmd: `--add-dir "${spaced}"`,
+      posix: `--add-dir '${spaced}'`
+    };
+
+    for (const shell of ['powershell', 'cmd', 'posix'] as Shell[]) {
+      const command = generateCommand(generatable({ allowDir: spaced, shell }));
+
+      assert.ok(
+        command.includes(quoted[shell]),
+        `${shell} should wrap the path as ${quoted[shell]}`
+      );
+    }
+  });
+
+  it('should_call_a_quoted_executable_with_the_powershell_call_operator', () => {
+    // Without &, PowerShell reads a quoted string at the start of a line as a
+    // value rather than a command.
+    const exe = 'C:\\Program Files\\claude.exe';
+    const command = generateCommand(generatable({ exe, shell: 'powershell' }));
+
+    assert.ok(command.startsWith(`& '${exe}'`));
+  });
+
+  it('should_escape_a_single_quote_in_a_posix_path', () => {
+    const command = generateCommand(
+      generatable({ allowDir: "/home/me/o'brien", shell: 'posix' })
+    );
+
+    assert.ok(command.includes(`--add-dir '/home/me/o'\\''brien'`));
+  });
+
+  it('should_escape_a_single_quote_in_a_powershell_path', () => {
+    const command = generateCommand(
+      generatable({ allowDir: "C:\\o'brien", shell: 'powershell' })
+    );
+
+    assert.ok(command.includes(`--add-dir 'C:\\o''brien'`));
+  });
+});
+
+describe('shellKind', () => {
+  it('should_treat_pwsh_as_powershell', () => {
+    assert.equal(shellKind('C:\\Program Files\\PowerShell\\7\\pwsh.exe', 'win32'), 'powershell');
+  });
+
+  it('should_treat_cmd_as_cmd', () => {
+    assert.equal(shellKind('C:\\WINDOWS\\System32\\cmd.exe', 'win32'), 'cmd');
+  });
+
+  it('should_treat_git_bash_on_windows_as_posix', () => {
+    // Git Bash and WSL run on Windows but quote like POSIX.
+    assert.equal(shellKind('C:\\Program Files\\Git\\bin\\bash.exe', 'win32'), 'posix');
+  });
+
+  it('should_treat_any_shell_off_windows_as_posix', () => {
+    assert.equal(shellKind('/bin/zsh', 'darwin'), 'posix');
+    assert.equal(shellKind('/usr/bin/fish', 'linux'), 'posix');
+  });
+
+  it('should_fall_back_to_powershell_for_an_unknown_windows_shell', () => {
+    // VS Code's own default profile on Windows.
+    assert.equal(shellKind('C:\\tools\\nushell\\nu.exe', 'win32'), 'powershell');
   });
 });
 

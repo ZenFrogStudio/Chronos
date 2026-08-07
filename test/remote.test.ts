@@ -74,6 +74,10 @@ describe('toRemoteSeries — the privacy boundary', () => {
   it('should_show_the_permission_mode_so_the_phone_can_warn_about_full_auto', () => {
     assert.equal(toRemoteSeries(series()).permissionMode, 'bypassPermissions');
   });
+
+  it('should_show_which_engine_a_task_runs_on', () => {
+    assert.equal(toRemoteSeries(series({ agent: 'opencode' })).agent, 'opencode');
+  });
 });
 
 describe('toRemoteRun — the privacy boundary', () => {

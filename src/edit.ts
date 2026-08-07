@@ -1,4 +1,5 @@
-import { PermissionMode, Recurrence, TaskSeries } from './types';
+import { isAgentId } from './agents';
+import { AgentId, PermissionMode, Recurrence, TaskSeries } from './types';
 
 /**
  * What the manager is allowed to change about a scheduled series.
@@ -6,9 +7,11 @@ import { PermissionMode, Recurrence, TaskSeries } from './types';
  * The webview is our own code behind a nonce-locked CSP, so this is not defence
  * against a hostile sender — it is defence against a typed interface being
  * mistaken for a checked one. `Partial<TaskSeries>` is erased at runtime, and
- * two of these fields leave the process: `model` becomes an argv entry for a
- * shell-invoked spawn on Windows, and `filePath` decides which file the agent is
- * handed as its prompt. Neither should be settable by a message.
+ * three of these fields leave the process: `model` becomes an argv entry for a
+ * shell-invoked spawn on Windows, `agent` chooses which executable that spawn
+ * runs, and `filePath` decides which file the agent is handed as its prompt.
+ * None should be settable by a message — `agent` is checked against a closed
+ * list, so it can only ever name an engine this build already knows about.
  *
  * `command.ts` does the same job for the phone, with a narrower list. This is
  * the desktop's, and the two are deliberately separate: the manager may change
@@ -31,8 +34,12 @@ const PERMISSION_MODES: readonly PermissionMode[] = [
  * released after this build still works. The shape is the part that matters:
  * `runner.ts` spawns through a shell on Windows, where Node does not quote
  * arguments, so anything a shell would read as syntax must not survive.
+ *
+ * `/` and `:` are allowed because every opencode model id needs both —
+ * `opencode/north-mini-code-free`, `ollama/gemma4:26b`. Neither is shell syntax
+ * in argument position, so the guarantee above is unchanged.
  */
-const MODEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
+const MODEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,99}$/;
 
 const TIME_PATTERN = /^([01]\d|2[0-3]):([0-5]\d)$/;
 
@@ -99,6 +106,19 @@ export function seriesEdit(raw: unknown): SeriesEdit {
       case 'permissionMode': {
         if (PERMISSION_MODES.includes(value as PermissionMode)) {
           patch.permissionMode = value as PermissionMode;
+        } else {
+          rejected.push(key);
+        }
+        break;
+      }
+
+      case 'agent': {
+        // Empty or absent means Claude, which is what an unset `agent` has
+        // always meant — so clearing it is a valid edit rather than a rejection.
+        if (value === undefined || value === null || value === '') {
+          patch.agent = undefined;
+        } else if (isAgentId(value)) {
+          patch.agent = value as AgentId;
         } else {
           rejected.push(key);
         }

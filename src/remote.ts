@@ -16,6 +16,8 @@ export interface RemoteSeries {
   fileName: string;
   /** Displayed, never remotely writable — changing it is privilege escalation. */
   permissionMode: string;
+  /** Same rule: which engine runs is *what* a task does, not *when*. */
+  agent?: string;
   model?: string;
   recurrence: TaskSeries['recurrence'];
   nextRunAt: string;
@@ -55,6 +57,7 @@ export function toRemoteSeries(series: TaskSeries): RemoteSeries {
     id: series.id,
     fileName: series.fileName,
     permissionMode: series.permissionMode,
+    agent: series.agent,
     model: series.model,
     recurrence: series.recurrence,
     nextRunAt: series.nextRunAt,

@@ -4,7 +4,7 @@ import * as path from 'path';
 /**
  * The plan library: a folder of `.md` files. There is deliberately no index,
  * manifest or id table — an index is a second source of truth that drifts from
- * the filesystem the moment someone edits a file outside Chronus. The directory
+ * the filesystem the moment someone edits a file outside Chronos. The directory
  * *is* the database.
  *
  * No `vscode` import, so every rule here is testable against a temp directory.
@@ -111,31 +111,42 @@ export function samePath(a: string, b: string, ignoreCase = process.platform ===
   return ignoreCase ? left.toLowerCase() === right.toLowerCase() : left === right;
 }
 
-/**
- * Whether an absolute path is one of the plans Chronus is scheduled to run.
- *
- * External plans bypass `resolveInLibrary` deliberately — that guard governs
- * name-derived paths, and an absolute path the user explicitly scheduled is
- * already trusted at a higher level, since the runner reads and executes it.
- * That reasoning only holds for paths actually *in* the schedule, so this is the
- * check that makes it true. Without it, `savePlan` would write arbitrary text to
- * any path the webview named.
- */
-export function isScheduledPlan(
-  scheduledPaths: readonly string[],
-  candidate: string,
-  ignoreCase = process.platform === 'win32'
-): boolean {
-  return scheduledPaths.some((scheduled) => samePath(scheduled, candidate, ignoreCase));
-}
-
 export const titleOf = (name: string): string => name.slice(0, -path.extname(name).length);
+
+/** Long enough for a real sentence, short enough not to be truncated twice by
+ *  the sidebar's own width. */
+const TASK_LABEL_MAX = 80;
+
+/**
+ * How a task file reads as a single tree row: its first non-empty line, stripped
+ * of the Markdown marks that make a heading or a bullet, and clipped.
+ *
+ * The file is the task — this only decides how it is displayed, so nothing here
+ * is ever written back. A task may grow to several lines once Claude has asked
+ * about it, and the row must stay one line regardless.
+ */
+export function taskLabel(text: string): string {
+  const firstLine = text
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^\s*(?:#{1,6}\s+|[-*+]\s+|\d+\.\s+)?/, '').trim())
+    .find((line) => line !== '');
+
+  if (!firstLine) {
+    return '(empty task)';
+  }
+  return firstLine.length > TASK_LABEL_MAX
+    ? `${firstLine.slice(0, TASK_LABEL_MAX - 1).trimEnd()}…`
+    : firstLine;
+}
 
 /**
  * Resolves a name inside the library, refusing anything that escapes it. Every
- * write path goes through here.
+ * read and write goes through here, and so does every caller that needs a plan's
+ * absolute path — scheduling it, opening it in an editor — because a name is the
+ * only way the webview may address a plan, and a name must never reach the
+ * filesystem unchecked.
  */
-function resolveInLibrary(dir: string, name: string): string {
+export function planPath(dir: string, name: string): string {
   const candidate = path.join(dir, path.basename(name));
   if (!isInside(dir, candidate) || !isPlanFile(candidate)) {
     throw new Error(`Refusing to touch a path outside the plan library: ${name}`);
@@ -157,15 +168,15 @@ export function ensureLibrary(dir: string): boolean {
 export function seedLibrary(dir: string): void {
   createPlan(
     dir,
-    'Hello Chronus',
+    'Hello Chronos',
     [
-      '# Hello Chronus',
+      '# Hello Chronos',
       '',
       'Reply with exactly the word `OK` and then stop.',
       '',
       'Do not create, edit, move or delete any files. Do not run any shell',
       'commands. This plan exists so you can confirm scheduling works before',
-      'trusting Chronus with something real.',
+      'trusting Chronos with something real.',
       ''
     ].join('\n')
   );
@@ -207,7 +218,7 @@ export function listPlans(dir: string): PlanFile[] {
 }
 
 function describe(dir: string, name: string): PlanFile {
-  const filePath = resolveInLibrary(dir, name);
+  const filePath = planPath(dir, name);
   const stat = fs.statSync(filePath);
   return {
     name,
@@ -224,38 +235,41 @@ export function createPlan(dir: string, title: string, body?: string): PlanFile 
     listPlans(dir).map((p) => p.name),
     toPlanFileName(title)
   );
-  const filePath = resolveInLibrary(dir, name);
+  const filePath = planPath(dir, name);
   fs.writeFileSync(filePath, body ?? starterBody(titleOf(name)), 'utf8');
   return describe(dir, name);
 }
 
 export function readPlan(dir: string, name: string): string {
-  return fs.readFileSync(resolveInLibrary(dir, name), 'utf8');
+  return fs.readFileSync(planPath(dir, name), 'utf8');
 }
 
 export function writePlan(dir: string, name: string, text: string): void {
-  fs.writeFileSync(resolveInLibrary(dir, name), text, 'utf8');
+  fs.writeFileSync(planPath(dir, name), text, 'utf8');
 }
 
 /**
- * Reads and writes a plan by its own absolute path, for external plans the user
- * explicitly scheduled from elsewhere on disk. These bypass `resolveInLibrary`
- * deliberately: that guard governs *name-derived* paths so a typed title cannot
- * escape the library. An absolute path already in the schedule is trusted at a
- * strictly higher level — the runner reads and executes it — so editing it grants
- * nothing new. `resolveInLibrary` is unchanged and still guards every library write.
+ * Copies a file from anywhere on disk into the library, under a name derived
+ * from its own. The source is read, never moved or linked — the user's file
+ * stays exactly where it was, and the copy is what Chronos goes on to schedule,
+ * edit and run.
+ *
+ * This is the single door into the library for outside files: everything that
+ * adds a plan (Import, a drop, right-click → Schedule, the one-time migration of
+ * old external schedules) comes through here, which is what makes "every
+ * scheduled plan is a library plan" true rather than merely intended.
  */
-export function readPlanAt(filePath: string): string {
-  return fs.readFileSync(filePath, 'utf8');
-}
-
-export function writePlanAt(filePath: string, text: string): void {
-  fs.writeFileSync(filePath, text, 'utf8');
+export function importFile(dir: string, sourcePath: string): PlanFile {
+  return createPlan(
+    dir,
+    path.basename(sourcePath, path.extname(sourcePath)),
+    fs.readFileSync(sourcePath, 'utf8')
+  );
 }
 
 /** Returns the plan under its new name, which may have been deduplicated. */
 export function renamePlan(dir: string, name: string, newTitle: string): PlanFile {
-  const from = resolveInLibrary(dir, name);
+  const from = planPath(dir, name);
   const desired = toPlanFileName(newTitle);
 
   if (desired.toLowerCase() === name.toLowerCase()) {
@@ -266,7 +280,7 @@ export function renamePlan(dir: string, name: string, newTitle: string): PlanFil
     listPlans(dir).map((p) => p.name),
     desired
   );
-  fs.renameSync(from, resolveInLibrary(dir, to));
+  fs.renameSync(from, planPath(dir, to));
   return describe(dir, to);
 }
 
@@ -275,12 +289,12 @@ export function duplicatePlan(dir: string, name: string): PlanFile {
     listPlans(dir).map((p) => p.name),
     `${titleOf(name)}-copy${EXTENSION}`
   );
-  fs.copyFileSync(resolveInLibrary(dir, name), resolveInLibrary(dir, copy));
+  fs.copyFileSync(planPath(dir, name), planPath(dir, copy));
   return describe(dir, copy);
 }
 
 export function removePlan(dir: string, name: string): void {
-  fs.unlinkSync(resolveInLibrary(dir, name));
+  fs.unlinkSync(planPath(dir, name));
 }
 
 function starterBody(title: string): string {

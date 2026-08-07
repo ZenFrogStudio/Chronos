@@ -23,6 +23,7 @@ function outcome(overrides: Partial<Outcome> = {}): Outcome {
 const CONTEXT = {
   fileName: 'nightly-audit.md',
   cwd: 'D:\\repo',
+  engine: 'Claude Code',
   permissionMode: 'bypassPermissions',
   startedAt: new Date(2026, 6, 26, 21, 30),
   attempt: 1
@@ -30,12 +31,12 @@ const CONTEXT = {
 
 describe('parseLine — recognising events', () => {
   it('should_ignore_a_line_that_is_not_json', () => {
-    assert.deepEqual(parseLine('warming up...'), { events: [], isResult: false });
+    assert.deepEqual(parseLine('warming up...'), { events: [] });
   });
 
   it('should_ignore_a_truncated_json_line', () => {
     // Progress lines can be cut mid-stream; a parse failure must not throw.
-    assert.deepEqual(parseLine('{"type":"assist'), { events: [], isResult: false });
+    assert.deepEqual(parseLine('{"type":"assist'), { events: [] });
   });
 
   it('should_read_the_session_and_model_from_the_init_event', () => {
@@ -64,12 +65,14 @@ describe('parseLine — recognising events', () => {
     assert.deepEqual(events, []);
   });
 
-  it('should_flag_the_result_line_so_the_runner_can_retain_only_that_one', () => {
-    // The whole point of the flag: it is what lets the runner throw away every
-    // other line instead of accumulating the stream in memory.
-    const { isResult } = parseLine('{"type":"result","num_turns":4,"total_cost_usd":0.23}');
+  it('should_fold_the_result_line_so_the_runner_need_not_keep_the_stream', () => {
+    // The whole point of the summary: it is what lets the runner throw away
+    // every line instead of accumulating the stream in memory.
+    const { summary } = parseLine('{"type":"result","num_turns":4,"total_cost_usd":0.23}');
 
-    assert.equal(isResult, true);
+    assert.equal(summary?.sawResult, true);
+    assert.equal(summary?.numTurns, 4);
+    assert.equal(summary?.costUsd, 0.23);
   });
 
   it('should_count_permission_denials_on_the_result_event', () => {
@@ -116,6 +119,103 @@ describe('parseLine — tool detail', () => {
   });
 });
 
+/**
+ * The four event types a real `opencode run --format json` emitted, captured
+ * from a run told to write a file and read it back. The mapping only has to
+ * reach `TranscriptEvent`; everything downstream of that is already shared.
+ */
+describe('parseLine — opencode', () => {
+  const event = (type: string, part: Record<string, unknown>) =>
+    JSON.stringify({ type, timestamp: 1785790834801, sessionID: 'ses_1', part });
+
+  it('should_ignore_a_truncated_opencode_line', () => {
+    assert.deepEqual(parseLine('{"type":"tool_us', 'opencode'), { events: [] });
+  });
+
+  it('should_read_assistant_text', () => {
+    const line = event('text', { type: 'text', text: '  Created the file.  ' });
+
+    assert.deepEqual(parseLine(line, 'opencode').events, [
+      { kind: 'text', text: 'Created the file.' }
+    ]);
+  });
+
+  it('should_record_a_tool_call_and_what_it_touched', () => {
+    // The transcript exists to answer "what did it touch?" — without this an
+    // opencode transcript would be blind to every file edit and shell command.
+    const line = event('tool_use', {
+      type: 'tool',
+      tool: 'write',
+      state: { status: 'completed', input: { content: 'hi', filePath: '/tmp/hello.txt' } }
+    });
+
+    assert.deepEqual(parseLine(line, 'opencode').events, [
+      { kind: 'tool', name: 'write', detail: '/tmp/hello.txt' }
+    ]);
+  });
+
+  it('should_prefer_the_command_when_recording_an_opencode_shell_call', () => {
+    const line = event('tool_use', {
+      type: 'tool',
+      tool: 'bash',
+      state: { input: { command: 'npm test', description: 'run the suite' } }
+    });
+
+    const { events } = parseLine(line, 'opencode');
+
+    assert.equal(events[0].kind === 'tool' && events[0].detail, 'npm test');
+  });
+
+  it('should_count_each_finished_step_as_a_turn_without_narrating_it', () => {
+    // opencode reports per step, not per run. A "1 turn" line after every step
+    // would be noise, so the totals go to the footer and nothing to the body.
+    const line = event('step_finish', {
+      type: 'step-finish',
+      reason: 'stop',
+      tokens: { total: 7943 },
+      cost: 0.004
+    });
+
+    const { events, summary } = parseLine(line, 'opencode');
+
+    assert.deepEqual(events, []);
+    assert.equal(summary?.numTurns, 1);
+    assert.equal(summary?.costUsd, 0.004);
+    assert.equal(summary?.sawResult, true);
+  });
+
+  it('should_treat_an_error_event_as_a_terminal_failure', () => {
+    const line = JSON.stringify({
+      type: 'error',
+      sessionID: 'ses_1',
+      error: { name: 'UnknownError', data: { message: 'Unexpected server error.', ref: 'err_1' } }
+    });
+
+    const { summary } = parseLine(line, 'opencode');
+
+    assert.equal(summary?.isError, true);
+    assert.equal(summary?.sawResult, true);
+    assert.equal(summary?.resultText, 'Unexpected server error.');
+  });
+
+  it('should_say_nothing_about_a_step_starting', () => {
+    const line = event('step_start', { type: 'step-start' });
+
+    const { events, summary } = parseLine(line, 'opencode');
+
+    assert.deepEqual(events, []);
+    assert.equal(summary?.sawResult, undefined);
+  });
+
+  it('should_not_read_an_opencode_stream_with_the_claude_parser', () => {
+    // The engines share a shape, not a schema. Reading one as the other would
+    // silently produce an empty transcript rather than fail.
+    const line = event('text', { type: 'text', text: 'Created the file.' });
+
+    assert.deepEqual(parseLine(line, 'claude').events, []);
+  });
+});
+
 describe('toAnsi and toMarkdown — one parse, two renderings', () => {
   it('should_render_assistant_text_identically_in_both', () => {
     const event = { kind: 'text', text: 'Found three failures.' } as const;
@@ -159,6 +259,13 @@ describe('transcriptHeader', () => {
 
   it('should_say_default_when_no_model_is_pinned', () => {
     assert.ok(transcriptHeader(CONTEXT).includes('| Model | default |'));
+  });
+
+  it('should_name_the_engine_the_run_went_through', () => {
+    // Two engines mean "Sonnet 5" and "opencode default" are no longer enough
+    // on their own to say what actually ran.
+    assert.ok(transcriptHeader(CONTEXT).includes('| Engine | Claude Code |'));
+    assert.ok(transcriptHeader({ ...CONTEXT, engine: 'opencode' }).includes('| Engine | opencode |'));
   });
 
   it('should_note_the_attempt_only_when_this_is_a_retry', () => {

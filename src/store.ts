@@ -3,15 +3,15 @@ import * as vscode from 'vscode';
 import { pruneRuns } from './history';
 import { log } from './log';
 import { migrate } from './migrate';
-import { ChronusState, SCHEMA_VERSION, STORE_KEY, TaskRun, TaskSeries } from './types';
+import { ChronosState, SCHEMA_VERSION, STORE_KEY, TaskRun, TaskSeries } from './types';
 
-const BACKUP_KEY = 'chronus.state.backup';
+const BACKUP_KEY = 'chronos.state.backup';
 
 export function newId(): string {
   return randomUUID();
 }
 
-function emptyState(): ChronusState {
+function emptyState(): ChronosState {
   return { schemaVersion: SCHEMA_VERSION, series: [], runs: [] };
 }
 
@@ -21,7 +21,7 @@ export class Store {
 
   private constructor(
     private readonly memento: vscode.Memento,
-    private state: ChronusState
+    private state: ChronosState
   ) {}
 
   /**
@@ -38,7 +38,7 @@ export class Store {
 
     const migrated = migrate(raw);
     if (migrated) {
-      const from = (raw as Partial<ChronusState>).schemaVersion;
+      const from = (raw as Partial<ChronosState>).schemaVersion;
       if (from !== SCHEMA_VERSION) {
         log.info(`migrated stored state from schema v${from} to v${SCHEMA_VERSION}`);
         await memento.update(STORE_KEY, migrated);

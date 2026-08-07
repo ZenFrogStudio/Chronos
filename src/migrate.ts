@@ -1,4 +1,4 @@
-import { ChronusState, SCHEMA_VERSION } from './types';
+import { ChronosState, SCHEMA_VERSION } from './types';
 
 /**
  * Schema migration. Pure — no `vscode` import — so the ladder can be exercised
@@ -10,12 +10,12 @@ import { ChronusState, SCHEMA_VERSION } from './types';
  * migration path.
  */
 
-/** Structurally a Chronus state of *some* version, before any upgrading. */
-function isChronusShaped(raw: unknown): raw is ChronusState {
+/** Structurally a Chronos state of *some* version, before any upgrading. */
+function isChronosShaped(raw: unknown): raw is ChronosState {
   if (!raw || typeof raw !== 'object') {
     return false;
   }
-  const state = raw as Partial<ChronusState>;
+  const state = raw as Partial<ChronosState>;
   return (
     typeof state.schemaVersion === 'number' &&
     Array.isArray(state.series) &&
@@ -27,15 +27,15 @@ function isChronusShaped(raw: unknown): raw is ChronusState {
  * Upgrades stored state to the current schema, or returns undefined if the
  * shape is unrecognisable and the caller should back it up instead.
  *
- * State from a *newer* Chronus is also refused: guessing at a shape written by
+ * State from a *newer* Chronos is also refused: guessing at a shape written by
  * a future version risks corrupting it on the next write.
  */
-export function migrate(raw: unknown): ChronusState | undefined {
-  if (!isChronusShaped(raw)) {
+export function migrate(raw: unknown): ChronosState | undefined {
+  if (!isChronosShaped(raw)) {
     return undefined;
   }
 
-  let state: ChronusState = raw;
+  let state: ChronosState = raw;
   let version = state.schemaVersion;
   if (version > SCHEMA_VERSION || version < 1) {
     return undefined;
@@ -68,7 +68,7 @@ export function migrate(raw: unknown): ChronusState | undefined {
  * not paused by the user, so it is re-read as spent-and-enabled. A disabled
  * one-shot with no runs was genuinely paused and is left alone.
  */
-function v1ToV2(state: ChronusState): ChronusState {
+function v1ToV2(state: ChronosState): ChronosState {
   const hasRun = new Set(state.runs.map((run) => run.seriesId));
 
   return {

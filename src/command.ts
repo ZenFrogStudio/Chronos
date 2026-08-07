@@ -9,7 +9,7 @@ import {
 /**
  * What a phone is allowed to ask the desktop to do.
  *
- * This module *is* the security boundary. Chronus defaults new tasks to
+ * This module *is* the security boundary. Chronos defaults new tasks to
  * `bypassPermissions`, so a remote channel that could change what a plan says —
  * or which permissions it runs under — would be a "run arbitrary code on my dev
  * machine" button reachable from any network. Instead the phone may only change

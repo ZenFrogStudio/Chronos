@@ -11,7 +11,7 @@ const production = process.argv.includes('--production');
  * it here instead keeps F5 working on a clean machine.
  */
 const problemMatcherLog = {
-  name: 'chronus-log',
+  name: 'chronos-log',
   setup(build) {
     build.onStart(() => console.log('[build] started'));
     build.onEnd((result) => {
@@ -51,7 +51,7 @@ async function main() {
 
   if (watch) {
     await ctx.watch();
-    console.log('[chronus] watching...');
+    console.log('[chronos] watching...');
   } else {
     await ctx.rebuild();
     await ctx.dispose();
