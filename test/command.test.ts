@@ -236,6 +236,21 @@ describe('validateCommand — reschedule', () => {
     assert.deepEqual(patch.recurrence, { daysOfWeek: [1, 3], timeLocal: '18:30' });
   });
 
+  it('should_move_a_monthly_rules_day_to_match_the_new_date', () => {
+    // Monthly has no day picker of its own: the date you reschedule to is the
+    // day it repeats on from then on.
+    const target = new Date(2026, 7, 3, 18, 30);
+
+    const patch = patchOf(
+      check(
+        { kind: 'reschedule', payload: { nextRunAt: target.toISOString() } },
+        { series: [series({ recurrence: { daysOfWeek: [], timeLocal: '09:00', dayOfMonth: 15 } })] }
+      )
+    );
+
+    assert.deepEqual(patch.recurrence, { daysOfWeek: [], timeLocal: '18:30', dayOfMonth: 3 });
+  });
+
   it('should_refuse_a_time_that_has_clearly_already_passed', () => {
     const verdict = check({
       kind: 'reschedule',
@@ -299,7 +314,28 @@ describe('validateCommand — setRepeat', () => {
     );
   });
 
+  it('should_build_a_monthly_rule_from_the_day_the_series_already_runs_on', () => {
+    const patch = patchOf(check({ kind: 'setRepeat', payload: { repeat: 'monthly' } }));
+
+    // Read back rather than hardcoded: `nextRunAt` is a UTC instant and the day
+    // of the month is the local one, which differs by zone.
+    const expected = new Date(Date.parse(series().nextRunAt)).getDate();
+    assert.equal(patch.recurrence?.dayOfMonth, expected);
+  });
+
+  it('should_leave_a_monthly_rules_days_of_week_empty', () => {
+    const patch = patchOf(check({ kind: 'setRepeat', payload: { repeat: 'monthly' } }));
+
+    assert.deepEqual(patch.recurrence?.daysOfWeek, []);
+  });
+
   it('should_refuse_a_repeat_it_does_not_recognise', () => {
-    assert.equal(check({ kind: 'setRepeat', payload: { repeat: 'hourly' } }).ok, false);
+    const verdict = check({ kind: 'setRepeat', payload: { repeat: 'hourly' } });
+
+    assert.equal(verdict.ok, false);
+    assert.equal(
+      verdict.ok === false && verdict.reason,
+      'setRepeat expects once, daily, weekly or monthly.'
+    );
   });
 });

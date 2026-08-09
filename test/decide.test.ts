@@ -429,6 +429,32 @@ describe('decide — catch-up after an outage', () => {
     assert.ok(Date.parse(patches[0].nextRunAt as string) > NOW, 'advances to a future occurrence');
   });
 
+  it('should_collapse_missed_monthly_occurrences_into_one_and_advance', () => {
+    // A monthly rule carries an empty `daysOfWeek`, which the recurrence math
+    // used to treat as unusable — this series would have been paused as broken.
+    const monthsAgo = new Date(2026, 2, 15, 2, 0).toISOString();
+    const s = series({
+      recurrence: { daysOfWeek: [], timeLocal: '02:00', dayOfMonth: 15 },
+      nextRunAt: monthsAgo
+    });
+
+    const actions = act({ series: [s], reason: 'sleep' });
+
+    const created = added(actions);
+    assert.equal(created.length, 1, 'one decision, not four');
+    assert.equal(created[0].status, 'missed');
+    assert.ok((created[0].missedCount ?? 0) > 1);
+
+    const patches = seriesPatch(actions, s.id);
+    assert.equal(patches.length, 1);
+    assert.ok(Date.parse(patches[0].nextRunAt as string) > NOW, 'advances to a future occurrence');
+    assert.equal(
+      new Date(Date.parse(patches[0].nextRunAt as string)).getDate(),
+      15,
+      'and stays on the 15th'
+    );
+  });
+
   it('should_leave_next_run_at_untouched_when_a_retry_is_pending', () => {
     // Retries create runs; they never disturb the series' schedule.
     const s = series({

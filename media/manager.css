@@ -338,6 +338,13 @@ body.dragging .drop-overlay {
   opacity: 0.8;
 }
 
+/* The library's traffic light: live on a schedule, not on one, and a missed
+   occurrence still waiting on you. Placed after the selected-row rule above and
+   with matching specificity, so selecting a row does not grey out its verdict. */
+.plan-item .plan-meta.is-live { color: var(--ok); }
+.plan-item .plan-meta.is-idle { color: var(--sodium); }
+.plan-item .plan-meta.is-missed { color: var(--danger); }
+
 /* Pinned under the scrolling list rather than inside it: finished plans neither
    push the live ones out of view nor scroll away themselves. Capped so a long
    pile takes a third of the panel at most, and scrolls within that. */

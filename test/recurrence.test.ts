@@ -17,6 +17,12 @@ const weekly = (daysOfWeek: number[], timeLocal: string): Recurrence => ({
   daysOfWeek,
   timeLocal
 });
+/** A monthly rule carries no days of week — the day of the month is the rule. */
+const monthly = (dayOfMonth: number, timeLocal: string): Recurrence => ({
+  daysOfWeek: [],
+  timeLocal,
+  dayOfMonth
+});
 
 /** Local-time assertion helper — the whole point is what the wall clock reads. */
 function assertLocal(actual: Date, expected: string): void {
@@ -96,6 +102,55 @@ describe('computeNextRun', () => {
   });
 });
 
+describe('computeNextRun — monthly rules', () => {
+  it('should_return_this_months_day_when_it_has_not_yet_passed', () => {
+    const after = new Date(2026, 6, 10, 12, 0);
+    const next = computeNextRun(monthly(15, '09:00'), after);
+    assertLocal(next, '2026-07-15 09:00');
+  });
+
+  it('should_roll_to_next_month_when_this_months_day_has_passed', () => {
+    const after = new Date(2026, 6, 15, 10, 0);
+    const next = computeNextRun(monthly(15, '09:00'), after);
+    assertLocal(next, '2026-08-15 09:00');
+  });
+
+  it('should_clamp_the_31st_to_the_last_day_of_a_short_month', () => {
+    // February 2026 has 28 days. The month must not be skipped.
+    const after = new Date(2026, 1, 1, 12, 0);
+    const next = computeNextRun(monthly(31, '09:00'), after);
+    assertLocal(next, '2026-02-28 09:00');
+  });
+
+  it('should_clamp_the_31st_to_the_29th_in_a_leap_february', () => {
+    const after = new Date(2028, 1, 1, 12, 0);
+    const next = computeNextRun(monthly(31, '09:00'), after);
+    assertLocal(next, '2028-02-29 09:00');
+  });
+
+  it('should_clamp_the_31st_to_the_30th_of_a_thirty_day_month', () => {
+    const after = new Date(2026, 3, 1, 12, 0); // April
+    const next = computeNextRun(monthly(31, '09:00'), after);
+    assertLocal(next, '2026-04-30 09:00');
+  });
+
+  it('should_roll_over_the_year_from_december_to_january', () => {
+    const after = new Date(2026, 11, 20, 12, 0);
+    const next = computeNextRun(monthly(15, '09:00'), after);
+    assertLocal(next, '2027-01-15 09:00');
+  });
+
+  it('should_not_reject_a_monthly_rule_for_having_no_days_of_week', () => {
+    // The days-of-week guard runs after the monthly branch on purpose; before
+    // it, every monthly rule would throw inside the scheduler's tick.
+    assert.doesNotThrow(() => computeNextRun(monthly(15, '09:00'), new Date(2026, 6, 26)));
+  });
+
+  it('should_throw_when_a_monthly_rules_time_is_malformed', () => {
+    assert.throws(() => computeNextRun(monthly(15, 'not-a-time'), new Date(2026, 6, 26)));
+  });
+});
+
 describe('advancePast — catch-up after an outage', () => {
   it('should_not_skip_anything_when_the_next_occurrence_is_still_ahead', () => {
     // Arrange: due at 09:00, currently 08:30 on the same day.
@@ -144,5 +199,19 @@ describe('advancePast — catch-up after an outage', () => {
     // Assert
     assert.equal(skipped, 2);
     assertLocal(next, '2026-07-27 09:00');
+  });
+
+  it('should_collapse_several_missed_monthly_occurrences_into_one_catch_up', () => {
+    // Arrange: due the 15th, last fired 2026-03-15, machine back 2026-07-26.
+    // April, May, June and July are all behind us; the next is August.
+    const from = new Date(2026, 2, 15, 9, 0);
+    const now = new Date(2026, 6, 26, 12, 0);
+
+    // Act
+    const { next, skipped } = advancePast(monthly(15, '09:00'), from, now);
+
+    // Assert
+    assert.equal(skipped, 4);
+    assertLocal(next, '2026-08-15 09:00');
   });
 });

@@ -139,6 +139,11 @@ function reschedule(series: TaskSeries, payload: unknown, now: number): CommandV
   const patch: Partial<TaskSeries> = { nextRunAt: iso, spent: false };
   if (series.recurrence) {
     patch.recurrence = { ...series.recurrence, timeLocal: localTimeOf(target) };
+    // A monthly rule's day comes from the date it runs on, so moving the date
+    // moves the rule — the same thing the manager's When field does.
+    if (series.recurrence.dayOfMonth) {
+      patch.recurrence.dayOfMonth = new Date(target).getDate();
+    }
   }
   return { ok: true, kind: 'series', id: series.id, patch };
 }
@@ -164,7 +169,14 @@ function setRepeat(series: TaskSeries, payload: unknown): CommandVerdict {
     return recurrencePatch(series, { daysOfWeek: days, timeLocal });
   }
 
-  return reject('setRepeat expects once, daily or weekly.');
+  if (repeat === 'monthly') {
+    // The day is taken from the date the series already runs on, so there is
+    // nothing extra for the phone to send — and nothing extra to validate.
+    const dayOfMonth = new Date(Date.parse(series.nextRunAt)).getDate();
+    return recurrencePatch(series, { daysOfWeek: [], timeLocal, dayOfMonth });
+  }
+
+  return reject('setRepeat expects once, daily, weekly or monthly.');
 }
 
 function recurrencePatch(series: TaskSeries, recurrence: Recurrence): CommandVerdict {

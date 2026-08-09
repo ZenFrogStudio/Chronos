@@ -177,6 +177,20 @@ function validRecurrence(value: unknown): Recurrence | undefined {
   if (typeof candidate.timeLocal !== 'string' || !TIME_PATTERN.test(candidate.timeLocal)) {
     return undefined;
   }
+
+  // A monthly rule keeps its day in `dayOfMonth` and leaves `daysOfWeek` empty,
+  // so it is checked first — the days-of-week rules below would reject it.
+  if (candidate.dayOfMonth !== undefined) {
+    if (
+      !Number.isInteger(candidate.dayOfMonth) ||
+      candidate.dayOfMonth < 1 ||
+      candidate.dayOfMonth > 31
+    ) {
+      return undefined;
+    }
+    return { daysOfWeek: [], timeLocal: candidate.timeLocal, dayOfMonth: candidate.dayOfMonth };
+  }
+
   if (!Array.isArray(candidate.daysOfWeek) || candidate.daysOfWeek.length === 0) {
     return undefined;
   }

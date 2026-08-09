@@ -173,6 +173,44 @@ describe('edit — the schedule', () => {
       );
     }
   });
+
+  it('should_accept_a_monthly_rule_with_no_days_of_week', () => {
+    const { patch, rejected } = seriesEdit({
+      recurrence: { daysOfWeek: [], timeLocal: '09:00', dayOfMonth: 15 }
+    });
+
+    assert.deepEqual(patch.recurrence, { daysOfWeek: [], timeLocal: '09:00', dayOfMonth: 15 });
+    assert.deepEqual(rejected, []);
+  });
+
+  it('should_reject_a_day_of_the_month_outside_1_to_31', () => {
+    for (const bad of [0, 32, -1]) {
+      assert.deepEqual(
+        seriesEdit({ recurrence: { daysOfWeek: [], timeLocal: '09:00', dayOfMonth: bad } }).rejected,
+        ['recurrence'],
+        `should have rejected ${bad}`
+      );
+    }
+  });
+
+  it('should_reject_a_day_of_the_month_that_is_not_a_whole_number', () => {
+    for (const bad of [15.5, '15', null]) {
+      assert.deepEqual(
+        seriesEdit({ recurrence: { daysOfWeek: [], timeLocal: '09:00', dayOfMonth: bad } }).rejected,
+        ['recurrence'],
+        `should have rejected ${JSON.stringify(bad)}`
+      );
+    }
+  });
+
+  it('should_reject_a_monthly_rule_whose_time_is_not_a_wall_clock', () => {
+    // `timeLocal` is checked before the monthly branch, so a valid day cannot
+    // smuggle an unusable time past the door.
+    assert.deepEqual(
+      seriesEdit({ recurrence: { daysOfWeek: [], timeLocal: '25:00', dayOfMonth: 15 } }).rejected,
+      ['recurrence']
+    );
+  });
 });
 
 describe('edit — retries and working directory', () => {

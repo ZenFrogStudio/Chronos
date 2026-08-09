@@ -72,6 +72,27 @@ logic out; one of the moves also narrowed a guard.
 
 ### Added
 
+- **Added a Monthly repeat option** — runs on the same day of the month, clamped
+  to the last day for shorter months. The day comes from the **When** field
+  rather than a picker of its own, the way Weekly takes its weekday: set When to
+  the 15th, choose **Repeat → Monthly**, and it runs on the 15th from then on.
+  Set it to the 31st and February fires on the 28th (29th in a leap year) — the
+  month is never silently skipped.
+
+  Recurrence has never been stored as a word. `once`, `daily` and `weekly` are
+  all read back out of `{ daysOfWeek, timeLocal }`, and "the 15th of the month"
+  is not a thing a days-of-week array can say, so the rule gained an optional
+  `dayOfMonth`. Optional and additive, like `agent` before it: every rule already
+  on disk still parses, so there was no migration and no schema bump. When it is
+  set, `daysOfWeek` is empty and unused.
+
+- **The plan library reads as a traffic light.** The status line under each plan
+  is green while that plan is on a live schedule, amber while it is paused or not
+  scheduled at all, and red while an occurrence it missed is still waiting on you
+  to run or skip it. A repeating plan stays red even though the time it shows has
+  already moved on to the next slot — that is the case the old flat grey hid most
+  completely. Colours come from the palette the run badges already use, so a light
+  or high-contrast theme is handled by the same overrides.
 - **A task can now run on an engine other than Claude.** The Schedule section
   gains an **Engine** dropdown beside **Model**, and picking `opencode` runs that
   plan through the `opencode` CLI instead — which is one binary that routes to

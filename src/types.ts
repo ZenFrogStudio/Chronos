@@ -34,6 +34,15 @@ export interface Recurrence {
   daysOfWeek: number[];
   /** "HH:MM", 24-hour, local time. */
   timeLocal: string;
+  /**
+   * Day of the month, 1–31. When set this is a monthly rule and `daysOfWeek` is
+   * unused (stored as `[]`); a day past the end of a shorter month clamps to
+   * that month's last day, so the 31st still fires in February rather than
+   * silently skipping it. Optional and additive, like `AgentId` above — every
+   * rule stored before monthly existed still parses, so this needed no
+   * migration and no SCHEMA_VERSION bump.
+   */
+  dayOfMonth?: number;
 }
 
 /** The definition: what you create when you drop a file. */

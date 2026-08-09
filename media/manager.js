@@ -179,7 +179,13 @@
   }
 
   const repeatOf = (s) =>
-    !s.recurrence ? 'once' : s.recurrence.daysOfWeek.length === 7 ? 'daily' : 'weekly';
+    !s.recurrence
+      ? 'once'
+      : s.recurrence.dayOfMonth
+        ? 'monthly'
+        : s.recurrence.daysOfWeek.length === 7
+          ? 'daily'
+          : 'weekly';
 
   /** A series with no engine is a Claude series — the same rule the host uses. */
   const agentIdOf = (s) => (s && s.agent) || 'claude';
@@ -201,6 +207,16 @@
    */
   function intervalMs(s) {
     if (!s || !s.recurrence) return null;
+
+    // Monthly, before the day rules below: its `daysOfWeek` is empty. The ring
+    // is cosmetic, so the real length of the preceding month is close enough.
+    if (s.recurrence.dayOfMonth) {
+      const next = new Date(s.nextRunAt);
+      const prev = new Date(next);
+      prev.setMonth(prev.getMonth() - 1);
+      return next.getTime() - prev.getTime();
+    }
+
     const days = s.recurrence.daysOfWeek;
     if (!days.length) return null;
     if (days.length === 7) return 86400000;
@@ -227,6 +243,7 @@
   function cadenceOf(s) {
     const time = localTimeOf(s.nextRunAt);
     const repeat = repeatOf(s);
+    if (repeat === 'monthly') return `day ${s.recurrence.dayOfMonth} ${time}`;
     if (repeat === 'daily') return `daily ${time}`;
     if (repeat === 'weekly') {
       return `${s.recurrence.daysOfWeek.map((d) => DAY_NAMES[d]).join(' ')} ${time}`;
@@ -427,9 +444,31 @@
     return formatWhen(recencyOf(run));
   }
 
+  /**
+   * The colour that line carries. A missed occurrence outranks everything else —
+   * it is the one thing in this list still waiting on a decision, and a recurring
+   * series has already advanced to a future time that would otherwise read as
+   * healthy. Neutral is deliberate for a finished plan or a run in flight: the row
+   * already says both another way.
+   */
+  function metaState(series) {
+    if (series && state.runs.some((r) => r.seriesId === series.id && r.status === 'missed')) {
+      return 'is-missed';
+    }
+    if (!series || !series.enabled) return 'is-idle';
+    return series.spent ? '' : 'is-live';
+  }
+
   function planItem(plan) {
     const series = seriesForPlan(plan);
     const meta = planMeta(plan, series);
+    const metaClass = metaState(series);
+    // The one case where the text does not already say it: a recurring plan
+    // shows its next time, in red, because an earlier occurrence was missed.
+    const missedTitle =
+      metaClass === 'is-missed'
+        ? ' title="Missed an occurrence — run it now, or skip it, under Runs"'
+        : '';
 
     const classes = [
       'plan-item',
@@ -453,7 +492,7 @@
       <button class="${classes}" type="button"
         data-action="select" data-name="${esc(plan.name)}" data-focus-key="plan-${esc(plan.name)}">
         <span class="plan-name">${esc(plan.title)}</span>
-        <span class="plan-meta">${esc(meta)}</span>
+        <span class="plan-meta ${metaClass}"${missedTitle}>${esc(meta)}</span>
       </button>
       ${actions}
     </div>`;
@@ -548,7 +587,7 @@
         <label class="field">
           <span class="field-label">Repeat</span>
           <select class="field-input" data-field="repeat" data-focus-key="repeat">
-            ${['once', 'daily', 'weekly']
+            ${['once', 'daily', 'weekly', 'monthly']
               .map((v) => `<option value="${v}" ${v === repeat ? 'selected' : ''}>${v[0].toUpperCase() + v.slice(1)}</option>`)
               .join('')}
           </select>
@@ -1246,6 +1285,13 @@
       if (el.value === 'daily') {
         return patch(series.id, { recurrence: { daysOfWeek: [0, 1, 2, 3, 4, 5, 6], timeLocal } });
       }
+      // Monthly takes its day from the When field, the way weekly takes its
+      // weekday — so there is no second picker to keep in step with it.
+      if (el.value === 'monthly') {
+        return patch(series.id, {
+          recurrence: { daysOfWeek: [], timeLocal, dayOfMonth: new Date(series.nextRunAt).getDate() }
+        });
+      }
       return patch(series.id, {
         recurrence: { daysOfWeek: [new Date(series.nextRunAt).getDay()], timeLocal }
       });
@@ -1323,7 +1369,11 @@
   /** Moving a recurring series' time must move its rule too. */
   function whenPatch(series, iso) {
     const p = { nextRunAt: iso, spent: false };
-    if (series.recurrence) p.recurrence = { ...series.recurrence, timeLocal: localTimeOf(iso) };
+    if (series.recurrence) {
+      p.recurrence = { ...series.recurrence, timeLocal: localTimeOf(iso) };
+      // Monthly has no day picker of its own: the When field is how you move it.
+      if (series.recurrence.dayOfMonth) p.recurrence.dayOfMonth = new Date(iso).getDate();
+    }
     return p;
   }
 
