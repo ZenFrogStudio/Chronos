@@ -157,6 +157,26 @@ body.dragging .drop-overlay {
   color: var(--muted);
 }
 
+/* Which folder's plans these are. Full width and directly under the title,
+   because it changes every list on the page — a control with that much reach
+   should not sit in the row of icon buttons. */
+.root-folder {
+  width: 100%;
+  margin-bottom: 8px;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  font: inherit;
+  font-size: 0.9em;
+}
+
+.root-folder:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+
 /* Centred, because the row mixes text buttons with taller icon ones. Wrapping
    rather than shrinking: at a large editor font four controls do not fit 260px,
    and a squashed "New plan" reads worse than a second row. */

@@ -2,17 +2,11 @@ import { randomUUID } from 'crypto';
 import * as vscode from 'vscode';
 import { pruneRuns } from './history';
 import { log } from './log';
-import { migrate } from './migrate';
-import { ChronosState, SCHEMA_VERSION, STORE_KEY, TaskRun, TaskSeries } from './types';
-
-const BACKUP_KEY = 'chronos.state.backup';
+import { readState, writeState } from './state-file';
+import { ChronosState, SCHEMA_VERSION, TaskRun, TaskSeries } from './types';
 
 export function newId(): string {
   return randomUUID();
-}
-
-function emptyState(): ChronosState {
-  return { schemaVersion: SCHEMA_VERSION, series: [], runs: [] };
 }
 
 export class Store {
@@ -20,36 +14,27 @@ export class Store {
   readonly onDidChange = this.emitter.event;
 
   private constructor(
-    private readonly memento: vscode.Memento,
+    private file: string,
     private state: ChronosState
   ) {}
 
   /**
-   * Known older versions are upgraded through `migrate()`. Only a genuinely
-   * unrecognisable shape is set aside under a backup key, and even then it is
-   * preserved rather than dropped.
+   * Loads one folder's schedule. The reading, migrating and setting-aside all
+   * happen in `state-file.ts`; this only reports what it did.
    */
-  static async create(memento: vscode.Memento): Promise<Store> {
-    const raw = memento.get<unknown>(STORE_KEY);
+  static async create(file: string): Promise<Store> {
+    return new Store(file, load(file));
+  }
 
-    if (raw === undefined) {
-      return new Store(memento, emptyState());
-    }
-
-    const migrated = migrate(raw);
-    if (migrated) {
-      const from = (raw as Partial<ChronosState>).schemaVersion;
-      if (from !== SCHEMA_VERSION) {
-        log.info(`migrated stored state from schema v${from} to v${SCHEMA_VERSION}`);
-        await memento.update(STORE_KEY, migrated);
-      }
-      log.info(`loaded ${migrated.series.length} series, ${migrated.runs.length} runs`);
-      return new Store(memento, migrated);
-    }
-
-    log.warn('stored state unrecognised — preserved under backup key, starting fresh');
-    await memento.update(BACKUP_KEY, raw);
-    return new Store(memento, emptyState());
+  /**
+   * Points the store at a different folder's state. This is the whole of what
+   * switching folders means to the schedule — everything else in Chronos reads
+   * through the store or through a path thunk.
+   */
+  async retarget(file: string): Promise<void> {
+    this.file = file;
+    this.state = load(file);
+    this.emitter.fire();
   }
 
   dispose(): void {
@@ -129,7 +114,22 @@ export class Store {
 
   private async persist(): Promise<void> {
     this.state.runs = pruneRuns(this.state.runs);
-    await this.memento.update(STORE_KEY, this.state);
+    writeState(this.file, this.state);
     this.emitter.fire();
   }
+}
+
+function load(file: string): ChronosState {
+  const result = readState(file);
+
+  if (result.backedUpTo) {
+    log.warn(`state at ${file} was unreadable — copied to ${result.backedUpTo}, starting fresh`);
+  } else if (result.migratedFrom !== undefined) {
+    log.info(`migrated ${file} from schema v${result.migratedFrom} to v${SCHEMA_VERSION}`);
+  }
+
+  log.info(
+    `loaded ${result.state.series.length} series, ${result.state.runs.length} runs from ${file}`
+  );
+  return result.state;
 }

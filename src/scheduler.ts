@@ -30,7 +30,9 @@ export class Scheduler implements vscode.Disposable {
   constructor(
     private readonly store: Store,
     private readonly runner: Runner,
-    private readonly lockFile: string
+    /** Resolved per tick: the lock lives beside the folder it arbitrates, so it
+     *  moves when the active folder does. */
+    private readonly lockFile: () => string
   ) {
     this.subscription = runner.onDidFinish((e) => {
       void this.onFinished(e);
@@ -41,9 +43,7 @@ export class Scheduler implements vscode.Disposable {
     if (this.timer) {
       clearInterval(this.timer);
     }
-    if (this.holdsLock) {
-      releaseLock(this.lockFile, this.owner);
-    }
+    this.releaseNow();
     this.subscription.dispose();
     this.leadershipChanged.dispose();
   }
@@ -51,6 +51,22 @@ export class Scheduler implements vscode.Disposable {
   /** True when this window is the one running the schedule. */
   get leading(): boolean {
     return this.holdsLock;
+  }
+
+  /**
+   * Drops the lock on the folder being left, before `lockFile()` starts
+   * answering with the new one. Without this the old folder waits out
+   * `LOCK_STALE_MS` before another window can schedule it, for no reason —
+   * this window has already stopped.
+   */
+  releaseNow(): void {
+    if (!this.holdsLock) {
+      return;
+    }
+    releaseLock(this.lockFile(), this.owner);
+    this.holdsLock = false;
+    this.deferred.clear();
+    this.leadershipChanged.fire();
   }
 
   /**
@@ -91,13 +107,23 @@ export class Scheduler implements vscode.Disposable {
   }
 
   /**
+   * Claims the new folder's lock straight away after a switch, rather than
+   * leaving the window standing by until the next tick. Half a minute of "Run
+   * now" being refused, and of a banner saying another window is scheduling,
+   * would read as a bug.
+   */
+  async reclaim(): Promise<void> {
+    await this.tick();
+  }
+
+  /**
    * Renews or claims the scheduler lock, and reports whether this window should
    * act on this tick. A window that has just taken over inherits responsibility
    * for whatever the previous holder left running.
    */
   private async claimLeadership(now: number): Promise<boolean> {
     const before = this.holdsLock;
-    this.holdsLock = holdLock(this.lockFile, this.owner, now, LOCK_STALE_MS);
+    this.holdsLock = holdLock(this.lockFile(), this.owner, now, LOCK_STALE_MS);
 
     if (this.holdsLock === before) {
       return this.holdsLock;

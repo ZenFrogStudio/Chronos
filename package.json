@@ -2,7 +2,7 @@
   "name": "chronos",
   "displayName": "Chronos",
   "description": "Schedule Claude Code tasks from Markdown plan files.",
-  "version": "0.8.0-rc.23",
+  "version": "0.8.0-rc.24",
   "publisher": "Z3n",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -64,6 +64,11 @@
         "command": "chronos.addTask",
         "title": "Chronos: Add Task",
         "icon": "$(add)"
+      },
+      {
+        "command": "chronos.selectFolder",
+        "title": "Chronos: Select Folder",
+        "icon": "$(folder)"
       }
     ],
     "menus": {
@@ -115,12 +120,12 @@
         "chronos.libraryPath": {
           "type": "string",
           "default": "",
-          "markdownDescription": "Folder holding your plan library. Leave empty to use Chronos's own storage. Changing this does not move existing plans; already-scheduled tasks keep working either way, since they store absolute paths."
+          "markdownDescription": "Overrides where plans are kept. Leave empty for the default, `.chronos/plans` inside the folder you are working in — which is what makes each project's plans its own. Set here in *user* settings it points every project at one shared library again; set in *workspace* settings it moves just this project's. Changing it does not move existing plans, and already-scheduled tasks keep working either way, since they store absolute paths."
         },
         "chronos.resultsPath": {
           "type": "string",
           "default": "",
-          "markdownDescription": "Folder for run transcripts — one subfolder per plan, one Markdown file per run. Leave empty to use a `results` folder beside your plan library. These are never deleted automatically, unlike raw logs."
+          "markdownDescription": "Overrides where run transcripts are written — one subfolder per plan, one Markdown file per run. Leave empty for the default, `.chronos/results` inside the folder you are working in. These are never deleted automatically, unlike raw logs."
         },
         "chronos.planModel": {
           "type": "string",

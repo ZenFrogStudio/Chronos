@@ -1,16 +1,18 @@
 import * as fs from 'fs';
 
 /**
- * A single-holder lock, so only one VS Code window schedules.
+ * A single-holder lock, so only one VS Code window schedules a given folder.
  *
- * Two windows each activate their own extension host, and `globalState` gives
- * neither any sight of the other's writes — there is no change event and `get`
- * is served from that window's own cache. So both windows see the same task as
- * due, and both spawn an agent for it, in the same repository, at the same
- * moment. `maxConcurrent` cannot help: it counts one window's runs.
+ * Two windows each activate their own extension host, and each reads the
+ * folder's `state.json` once into memory — neither has any sight of the other's
+ * writes. So both see the same task as due, and both spawn an agent for it, in
+ * the same repository, at the same moment. `maxConcurrent` cannot help: it
+ * counts one window's runs.
  *
  * One file on disk arbitrates instead. Whoever holds it schedules; the others
- * show the UI and stay out of the way.
+ * show the UI and stay out of the way. The lock lives inside the folder's
+ * `.chronos`, so two windows on two different projects both schedule — they are
+ * not competing for the same tasks.
  *
  * No `vscode` import, so the rules are testable against a temp directory.
  */

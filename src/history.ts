@@ -5,9 +5,10 @@ import { MAX_MISSED_RUNS, MAX_RECENT_RUNS, TaskRun, isFinished } from './types';
  * the one place Chronos deletes something the user might still want, and that
  * rule should be a test rather than a hope.
  *
- * The store lives in `globalState`, so it cannot grow forever: a daily series
- * left running for a year is 365 finished runs, and a catch-up decision the user
- * never answers is a missed run that nothing else will ever clear.
+ * The store is one JSON file rewritten on every change, so it cannot grow
+ * forever: a daily series left running for a year is 365 finished runs, and a
+ * catch-up decision the user never answers is a missed run that nothing else
+ * will ever clear.
  */
 
 /**

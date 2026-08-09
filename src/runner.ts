@@ -64,12 +64,11 @@ export class Runner implements vscode.Disposable {
 
   constructor(
     private readonly store: Store,
-    private readonly logDir: string,
+    /** Resolved per run, like `resultsDir`: it moves when the folder does. */
+    private readonly logDir: () => string,
     /** Resolved per run: the setting can change without an editor restart. */
     private readonly resultsDir: () => string
-  ) {
-    fs.mkdirSync(this.logDir, { recursive: true });
-  }
+  ) {}
 
   dispose(): void {
     for (const run of this.active.values()) {
@@ -167,7 +166,9 @@ export class Runner implements vscode.Disposable {
 
     const prompt = readFile(series.filePath);
     const startedAt = new Date();
-    const logPath = path.join(this.logDir, `${run.id}.log`);
+    const logDir = this.logDir();
+    fs.mkdirSync(logDir, { recursive: true });
+    const logPath = path.join(logDir, `${run.id}.log`);
     const resultPath = this.prepareResultPath(series, startedAt);
 
     await this.store.updateRun(run.id, {

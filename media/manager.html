@@ -23,6 +23,9 @@
       <aside class="library">
         <header class="library-head">
           <h1 class="library-title">Plan library</h1>
+          <!-- Chronos data is per-folder, so this says whose plans these are.
+               Only shown when the workspace has more than one folder to pick. -->
+          <select id="root-folder" class="root-folder" aria-label="Chronos folder" hidden></select>
           <div class="library-actions">
             <button id="new-plan" class="button" type="button">New plan</button>
             <button id="import-plan" class="button is-quiet" type="button" title="Copy existing .md files into the library">Import</button>

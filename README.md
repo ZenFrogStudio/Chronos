@@ -64,15 +64,48 @@ You pick the model each time from a dropdown. `chronos.planModel` remembers the
 last one you chose, and does not affect scheduled runs, which use each plan's
 own model setting.
 
-A task is a `.md` file in a `tasks` folder inside your library, so it is just a
-file like everything else here: it can grow past one line, you can edit it in a
-real editor, and it survives anything that resets Chronos's state.
+A task is a `.md` file in `.chronos/tasks`, so it is just a file like everything
+else here: it can grow past one line, you can edit it in a real editor, and it
+survives anything that resets Chronos's state.
+
+## Everything is per folder
+
+Chronos keeps one set of tasks, plans, schedules and run history **per folder**,
+in a `.chronos` directory inside it:
+
+```
+your-project/
+  .chronos/
+    plans/          your plan .md files
+    tasks/          the task inbox
+    results/        run transcripts
+    logs/           raw event streams
+    state.json      schedules and run history
+    scheduler.lock
+```
+
+Open a project and you see that project's work and nothing else. The folder is
+ignored from git on creation (`.chronos/.gitignore` contains `*`) — edit that
+file if you would rather commit your plans.
+
+Because the schedule lives in the folder, **a folder's tasks only run while a VS
+Code window is open on it**. Two windows on two different projects now both
+schedule, where before only one window scheduled anything at all.
+
+If your workspace has more than one folder, a dropdown above the plan list
+chooses which one Chronos is showing. **Chronos: Select Folder** does the same
+from the command palette. Switching is refused while a run is in flight.
+
+The first folder you open after upgrading adopts whatever was in the old
+machine-wide storage — plans, tasks, transcripts, schedules and history. The
+originals are copied, not moved, so nothing is lost if you would rather
+redistribute them by hand.
 
 ## The plan library
 
-A plan is a `.md` file in one folder — `chronos.libraryPath`, defaulting to the
-extension's own storage. There is no index or database: the directory *is* the
-list, so editing a plan outside Chronos can never desynchronise anything.
+A plan is a `.md` file in one folder — `.chronos/plans`, or wherever
+`chronos.libraryPath` points. There is no index or database: the directory *is*
+the list, so editing a plan outside Chronos can never desynchronise anything.
 
 Every scheduled plan lives here; there is only one kind of plan. Delete a plan
 file from the folder and its schedule goes with it, whether Chronos is open at
@@ -103,7 +136,7 @@ A scheduled job runs while you are away, so the record it leaves is the whole
 point. Every run writes a Markdown transcript:
 
 ```
-results/
+.chronos/results/
   nightly-audit/
     2026-07-26-213045-completed.md
     2026-07-27-213012-failed.md
@@ -120,7 +153,7 @@ the manager's **Runs** section. **result** opens the transcript in Markdown
 preview; **raw log** still reaches the underlying event stream when something
 needs debugging.
 
-Transcripts live in `results` beside your plan library by default; set
+Transcripts live in `.chronos/results` inside the folder by default; set
 `chronos.resultsPath` to put them anywhere. **Show results folder** in the
 manager opens them in your file manager. Unlike raw logs, they are never
 deleted automatically.
@@ -177,8 +210,8 @@ invoking `claude` directly.
 | Setting | Default | Purpose |
 |---|---|---|
 | `chronos.claudePath` | `claude` | Path to the CLI |
-| `chronos.libraryPath` | *(extension storage)* | Where your plan `.md` files live |
-| `chronos.resultsPath` | *(`results` beside the library)* | Where run transcripts are written |
+| `chronos.libraryPath` | *(`.chronos/plans` in the folder)* | Where your plan `.md` files live |
+| `chronos.resultsPath` | *(`.chronos/results` in the folder)* | Where run transcripts are written |
 | `chronos.maxConcurrent` | `1` | Parallel agents in one repo will collide — raise deliberately |
 | `chronos.maxRetries` | `3` | Attempts after a failure |
 | `chronos.retryDelayMinutes` | `60` | Delay before retrying |

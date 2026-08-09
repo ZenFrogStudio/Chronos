@@ -7,7 +7,7 @@ import * as library from './library';
 import { log } from './log';
 import { createNonce, Manager } from './manager';
 import { CLAUDE_MODELS } from './agents';
-import { defaultCwd } from './series';
+import { ChronosPaths } from './roots';
 
 /**
  * The activity-bar view: a task inbox.
@@ -19,10 +19,11 @@ import { defaultCwd } from './series';
  * the manager was the wrong answer; this is the front of the pipeline the
  * manager does not have — capture, before generate, schedule and run.
  *
- * A task is a `.md` file in `<library>/tasks/`. No new store and no schema bump:
- * `library.ts` is already parameterised by directory, `listPlans` skips
- * subdirectories so `tasks/` never shows up as a plan, and a task survives a
- * state reset because it is just a file.
+ * A task is a `.md` file in the active folder's `.chronos/tasks/`. No new store
+ * and no schema bump: `library.ts` is already parameterised by directory,
+ * `listPlans` skips subdirectories so `tasks/` never shows up as a plan, and a
+ * task survives a state reset because it is just a file. The inbox is therefore
+ * per-folder for free — it is whatever `.chronos/tasks/` holds.
  *
  * It is a webview rather than a tree because a to-do list needs an always-there
  * text field, in-body buttons and coloured rows, none of which the TreeView API
@@ -55,22 +56,6 @@ type Inbound =
   | { type: 'deleteTask'; name: string }
   | { type: 'generatePlan'; name: string };
 
-/** Where tasks live, relative to the plan library that contains them. */
-export function tasksDirIn(libraryDir: string): string {
-  return path.join(libraryDir, 'tasks');
-}
-
-/**
- * Where a plan-generation session writes its result. One folder per session:
- * the file name is Claude's to choose now, so the folder is what matches a
- * landed plan back to the task that asked for it. Dot-prefixed and never
- * listed — `listPlans` only ever sees `.md` files, so this cannot show up as a
- * plan.
- */
-export function pendingDirIn(libraryDir: string): string {
-  return path.join(libraryDir, '.pending');
-}
-
 /** A planning session in flight: its staging folder and the task that asked. */
 interface PendingPlan {
   taskName: string;
@@ -92,7 +77,9 @@ export class TaskView implements vscode.WebviewViewProvider, vscode.Disposable {
 
   constructor(
     private readonly extensionUri: vscode.Uri,
-    private readonly libraryPath: () => string,
+    /** The active folder's layout. A thunk, so switching folders re-points the
+     *  inbox without rebuilding the view. */
+    private readonly paths: () => ChronosPaths,
     private readonly manager: Manager
   ) {}
 
@@ -156,8 +143,7 @@ export class TaskView implements vscode.WebviewViewProvider, vscode.Disposable {
   }
 
   private list(): InboxTask[] {
-    const dir = tasksDirIn(this.libraryPath());
-    return library.listPlans(dir).map((file) => ({
+    return library.listPlans(this.paths().tasks).map((file) => ({
       name: file.name,
       filePath: file.filePath,
       label: library.taskLabel(readOrEmpty(file.filePath))
@@ -182,7 +168,7 @@ export class TaskView implements vscode.WebviewViewProvider, vscode.Disposable {
   ///////////////////////////*Messages*////////////////////////////
 
   private async handle(message: Inbound): Promise<void> {
-    const dir = tasksDirIn(this.libraryPath());
+    const dir = this.paths().tasks;
 
     switch (message.type) {
       case 'ready':
@@ -260,7 +246,7 @@ export class TaskView implements vscode.WebviewViewProvider, vscode.Disposable {
     if (!text) {
       return;
     }
-    const task = library.createPlan(tasksDirIn(this.libraryPath()), text, `${text}\n`);
+    const task = library.createPlan(this.paths().tasks, text, `${text}\n`);
     log.info(`captured task ${task.name}`);
     this.post();
   }
@@ -285,18 +271,18 @@ export class TaskView implements vscode.WebviewViewProvider, vscode.Disposable {
     }
     await config.update('planModel', model, vscode.ConfigurationTarget.Global);
 
-    const cwd = await pickWorkingDirectory(task.filePath);
-    if (!cwd) {
-      return;
-    }
+    const paths = this.paths();
+    // The active folder, with nothing to ask about: a task now belongs to a
+    // folder rather than to one machine-wide inbox, so the folder it was
+    // captured in is the folder it is planned against.
+    const cwd = paths.folder;
 
-    const libraryDir = this.libraryPath();
     // Created rather than reserved: Claude needs somewhere to write, and an
     // empty folder left behind by a cancelled session costs nothing and is
     // cleaned up on dispose. The plan is named by Claude inside this folder,
     // then adopted into the library under a sanitised name.
     const sessionId = randomBytes(6).toString('hex');
-    const sessionDir = path.join(pendingDirIn(libraryDir), sessionId);
+    const sessionDir = path.join(paths.pending, sessionId);
     fs.mkdirSync(sessionDir, { recursive: true });
 
     const command = generateCommand({
@@ -304,8 +290,8 @@ export class TaskView implements vscode.WebviewViewProvider, vscode.Disposable {
       sourcePath: task.filePath,
       destDir: sessionDir,
       // One grant covers task, staging folder and library, since all three are
-      // inside the library.
-      allowDir: libraryDir,
+      // inside the folder's `.chronos` root.
+      allowDir: paths.root,
       model: model || undefined,
       shell: shellKind(vscode.env.shell, process.platform)
     });
@@ -352,12 +338,12 @@ export class TaskView implements vscode.WebviewViewProvider, vscode.Disposable {
 
     await settled(uri.fsPath);
 
-    const libraryDir = this.libraryPath();
+    const paths = this.paths();
     let plan: library.PlanFile;
     try {
       // The same door every outside file comes through: it slugs the name Claude
       // chose and de-duplicates it, so a colliding choice cannot overwrite a plan.
-      plan = library.importFile(libraryDir, uri.fsPath);
+      plan = library.importFile(paths.plans, uri.fsPath);
     } catch (err) {
       // The plan exists in the staging folder, so leave both it and the task
       // alone rather than clearing a task whose plan never reached the library.
@@ -370,7 +356,7 @@ export class TaskView implements vscode.WebviewViewProvider, vscode.Disposable {
     fs.rmSync(pending.dir, { recursive: true, force: true });
 
     try {
-      library.removePlan(tasksDirIn(libraryDir), pending.taskName);
+      library.removePlan(paths.tasks, pending.taskName);
       log.info(`plan ${plan.name} landed; cleared task ${pending.taskName}`);
     } catch (err) {
       // The plan is written and that is the part that mattered; a task the user
@@ -426,22 +412,6 @@ function pickModel(remembered: string): Promise<string | undefined> {
     });
     picker.show();
   });
-}
-
-/**
- * Where Claude runs while planning. A task file lives in the library, outside
- * every workspace folder, so `defaultCwd` would silently pick `folders[0]` on a
- * multi-root workspace — asking is the only honest option there.
- */
-async function pickWorkingDirectory(taskPath: string): Promise<string | undefined> {
-  const folders = vscode.workspace.workspaceFolders ?? [];
-  if (folders.length > 1) {
-    const picked = await vscode.window.showWorkspaceFolderPick({
-      placeHolder: 'Which folder should Claude plan against?'
-    });
-    return picked?.uri.fsPath;
-  }
-  return defaultCwd(taskPath);
 }
 
 function readOrEmpty(filePath: string): string {

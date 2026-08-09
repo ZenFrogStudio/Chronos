@@ -118,6 +118,12 @@ export interface ChronosState {
  * versions; it does not discard them.
  */
 export const SCHEMA_VERSION = 3;
+
+/**
+ * The `globalState` key state used to live under, before it moved to a
+ * `state.json` in each folder's `.chronos`. Kept only so the one-time adoption
+ * in `adopt.ts` can read what is still there; nothing writes it any more.
+ */
 export const STORE_KEY = 'chronos.state';
 
 /** Scheduler tick. A gap larger than 3x this means the process was suspended. */
@@ -161,8 +167,8 @@ export const MAX_MISSED_RUNS = 100;
 export const ERROR_MAX_CHARS = 500;
 
 /**
- * Result text stored per run. Capped because the store lives in `globalState`,
- * which is not the place for a full transcript — that goes on disk.
+ * Result text stored per run. Capped because `state.json` is read whole on every
+ * write and is not the place for a full transcript — that goes in its own file.
  */
 export const RESULT_MAX_CHARS = 600;
 

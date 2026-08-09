@@ -9,6 +9,7 @@ import { seriesEdit } from './edit';
 import * as library from './library';
 import { log, logConsolidation } from './log';
 import { generateCommand, shellKind } from './launch';
+import { ChronosPaths } from './roots';
 import { Scheduler } from './scheduler';
 import { createSeries, defaultCwd } from './series';
 import { Store } from './store';
@@ -37,7 +38,8 @@ type Inbound =
   | { type: 'dismissRun'; id: string }
   | { type: 'openResult'; id: string }
   | { type: 'revealResults' }
-  | { type: 'openLog'; id: string };
+  | { type: 'openLog'; id: string }
+  | { type: 'switchFolder'; folder: string };
 
 /**
  * The plan manager: a single editor-tab webview. Deliberately one panel reused
@@ -66,8 +68,11 @@ export class Manager implements vscode.Disposable {
     private readonly extensionUri: vscode.Uri,
     private readonly store: Store,
     private readonly scheduler: Scheduler,
-    private readonly libraryPath: () => string,
-    private readonly resultsPath: () => string
+    /** The active folder's layout. A thunk, so a folder switch needs no rebuild. */
+    private readonly paths: () => ChronosPaths,
+    /** Owned by `activate`, which is the only place that can move the store, the
+     *  scheduler's lock and this panel together. */
+    private readonly switchFolder: (folder: string) => Promise<void>
   ) {
     this.storeListener = store.onDidChange(() => this.post());
     // A non-leading window's store never changes, so the banner below would
@@ -130,7 +135,7 @@ export class Manager implements vscode.Disposable {
    * the user's own file is never edited or moved by Chronos.
    */
   async addPaths(filePaths: string[]): Promise<void> {
-    const dir = this.libraryPath();
+    const dir = this.paths().plans;
     const markdown = filePaths.filter((p) => path.extname(p).toLowerCase() === '.md');
     const rejected = filePaths.length - markdown.length;
     const scheduled: string[] = [];
@@ -138,8 +143,9 @@ export class Manager implements vscode.Disposable {
     for (const filePath of markdown) {
       const plan = library.importFile(dir, filePath);
       // `defaultCwd` reads the *original* path on purpose: it picks the workspace
-      // folder containing the file, and the copy now sits in global storage where
-      // that lookup would miss. A plan dropped from a project keeps running there.
+      // folder containing the file, which is not necessarily the folder whose
+      // library the copy lands in. A plan dropped in from another project keeps
+      // running against that project.
       const series = createSeries(plan.filePath, { cwd: defaultCwd(filePath) });
       await this.store.addSeries(series);
       log.info(`copied ${filePath} into the library as ${plan.name} and scheduled it (cwd ${series.cwd})`);
@@ -187,7 +193,7 @@ export class Manager implements vscode.Disposable {
       this.stopWatching();
     });
 
-    this.startWatching();
+    this.restartWatching();
   }
 
   // ---------- library watching ----------
@@ -198,9 +204,9 @@ export class Manager implements vscode.Disposable {
    * something changed. One watcher covers every plan, because every plan lives
    * in this one folder.
    */
-  private startWatching(): void {
+  restartWatching(): void {
     this.stopWatching();
-    const dir = this.libraryPath();
+    const dir = this.paths().plans;
     try {
       library.ensureLibrary(dir);
       this.watcher = fs.watch(dir, (_event, filename) => {
@@ -236,7 +242,7 @@ export class Manager implements vscode.Disposable {
   // ---------- messages ----------
 
   private async handle(message: Inbound): Promise<void> {
-    const dir = this.libraryPath();
+    const dir = this.paths().plans;
 
     switch (message.type) {
       case 'ready':
@@ -339,8 +345,12 @@ export class Manager implements vscode.Disposable {
       }
 
       case 'revealLibrary':
+        fs.mkdirSync(dir, { recursive: true });
         await vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(dir));
         return;
+
+      case 'switchFolder':
+        return this.switchFolder(message.folder);
 
       case 'schedulePlan': {
         const series = createSeries(library.planPath(dir, message.name));
@@ -418,7 +428,7 @@ export class Manager implements vscode.Disposable {
       }
 
       case 'revealResults': {
-        const results = this.resultsPath();
+        const results = this.paths().results;
         fs.mkdirSync(results, { recursive: true });
         await vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(results));
         return;
@@ -552,17 +562,28 @@ export class Manager implements vscode.Disposable {
     }
   }
 
-  private post(): void {
+  /** Public because `activate` re-posts after a folder switch, which changes
+   *  every list on the panel at once. */
+  post(): void {
     if (!this.panel) {
       return;
     }
 
-    const dir = this.libraryPath();
+    const paths = this.paths();
+    const dir = paths.plans;
 
     this.panel.webview.postMessage({
       type: 'state',
       libraryPath: dir,
-      resultsPath: this.resultsPath(),
+      resultsPath: paths.results,
+      // Which folder's plans, tasks and schedule these are, and what else could
+      // be shown instead. One folder is active at a time — the dropdown only
+      // appears when there is more than one to choose from.
+      activeFolder: paths.folder,
+      folders: (vscode.workspace.workspaceFolders ?? []).map((f) => ({
+        path: f.uri.fsPath,
+        name: f.name
+      })),
       // One list, because there is one kind of plan: `consolidate` guarantees
       // every series points at a file in this folder.
       plans: library.listPlans(dir),

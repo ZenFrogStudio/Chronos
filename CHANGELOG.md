@@ -20,6 +20,56 @@ shipped without any, because they lived in modules that import `vscode` and
 cannot load in the plain Node test runner. Closing the gaps meant moving the
 logic out; one of the moves also narrowed a guard.
 
+### Changed
+
+- **Everything Chronos knows is now per folder.** Tasks, plans, schedules, run
+  history and transcripts all live in a `.chronos` directory inside the folder
+  you are working in, instead of one machine-wide set shared by every project:
+
+  ```
+  your-project/.chronos/
+    plans/  tasks/  results/  logs/  state.json  scheduler.lock
+  ```
+
+  Open a project and you see that project's work and nothing else. The state
+  that used to sit in VS Code's `globalState` is a `state.json` written through
+  a temp file and a rename, so an interrupted write leaves the old schedule
+  rather than a truncated one. The directory is still the database — there is
+  no index, and `.chronos/plans` can be edited from outside Chronos exactly as
+  the library always could.
+
+  `.chronos/.gitignore` is written once on creation and contains `*`. Edit it if
+  you would rather commit your plans; Chronos never rewrites it, and it never
+  touches your project's own `.gitignore`.
+
+  Three consequences worth knowing:
+
+  - **A folder's tasks only run while a window is open on that folder.** This is
+    what folder-specific means, and it cuts both ways: two windows on two
+    different projects now both schedule, where before a single global lock
+    meant only one window scheduled anything at all. The lock moved into
+    `.chronos` with everything else.
+  - **The first folder you open after upgrading adopts the old data** — plans,
+    tasks, transcripts, schedules and history, all of it. Splitting it up
+    automatically would be guesswork, since a plan file says nothing about which
+    repository it belongs to, so it lands in one place and you move plans on
+    from there. It is copied, not moved: the old extension storage is left
+    exactly as it was, and the log says where.
+  - **A multi-root workspace shows one folder at a time.** A dropdown above the
+    plan list chooses which, remembered per workspace, with **Chronos: Select
+    Folder** as the command-palette route. Switching is refused while a run is
+    in flight rather than orphaning the child process and its half-written
+    transcript.
+
+  `chronos.libraryPath` and `chronos.resultsPath` still work and still override
+  their part of the layout. Set in workspace settings they move one project's
+  files; set in user settings they deliberately put every project back in one
+  shared place.
+
+- Generating a plan from a task no longer asks which folder to work in on a
+  multi-root workspace. The task belongs to a folder now, so that folder is the
+  answer.
+
 ### Added
 
 - **A task can now run on an engine other than Claude.** The Schedule section

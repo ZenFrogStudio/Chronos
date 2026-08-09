@@ -14,6 +14,7 @@
   const activityListEl = /** @type {HTMLElement} */ (document.getElementById('activity-list'));
   const activityFilterEl = /** @type {HTMLSelectElement} */ (document.getElementById('activity-filter'));
   const activityToggleEl = /** @type {HTMLElement} */ (document.getElementById('activity-toggle'));
+  const rootFolderEl = /** @type {HTMLSelectElement} */ (document.getElementById('root-folder'));
 
   const DAY_LABELS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
   const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -32,7 +33,7 @@
   const CUSTOM_MODEL = '__custom';
   const SAVE_DEBOUNCE_MS = 2000;
 
-  /** @type {{plans: any[], series: any[], runs: any[], activity: {upcoming: any[], recent: any[]}, costLast7Days: number, libraryPath: string, agents: {id: string, label: string, models: {value: string, label: string}[]}[], setupProblem?: string, schedulerElsewhere?: boolean}} */
+  /** @type {{plans: any[], series: any[], runs: any[], activity: {upcoming: any[], recent: any[]}, costLast7Days: number, libraryPath: string, activeFolder: string, folders: {path: string, name: string}[], agents: {id: string, label: string, models: {value: string, label: string}[]}[], setupProblem?: string, schedulerElsewhere?: boolean}} */
   let state = {
     plans: [],
     series: [],
@@ -40,6 +41,10 @@
     activity: { upcoming: [], recent: [] },
     costLast7Days: 0,
     libraryPath: '',
+    // Which folder's data is on screen, and what else this workspace offers.
+    // Everything here — plans, schedules, runs — belongs to `activeFolder`.
+    activeFolder: '',
+    folders: [],
     // Sent by the extension from `src/agents.ts`, so the sidebar's model picker
     // and these dropdowns cannot drift apart, and only engines this machine can
     // actually run are listed. Empty only before the first state message
@@ -291,8 +296,31 @@
     }
   }
 
+  /**
+   * The folder switcher. Hidden entirely for a single-folder workspace, where
+   * there is nothing to choose and the control would only be one more thing to
+   * read past.
+   */
+  function renderFolders() {
+    if (state.folders.length < 2) {
+      rootFolderEl.hidden = true;
+      return;
+    }
+
+    rootFolderEl.hidden = false;
+    rootFolderEl.textContent = '';
+    for (const folder of state.folders) {
+      const option = document.createElement('option');
+      option.value = folder.path;
+      option.textContent = folder.name;
+      option.selected = folder.path === state.activeFolder;
+      rootFolderEl.append(option);
+    }
+  }
+
   function render() {
     withFocusPreserved(() => {
+      renderFolders();
       renderList();
       renderDetail();
       renderActivity();
@@ -1285,6 +1313,12 @@
   document.getElementById('import-plan').addEventListener('click', () => send({ type: 'importPlan' }));
   document.getElementById('reveal-library').addEventListener('click', () => send({ type: 'revealLibrary' }));
   document.getElementById('reveal-results').addEventListener('click', () => send({ type: 'revealResults' }));
+
+  // The host may refuse — a run in flight belongs to the folder being left — and
+  // answers either way with a fresh state, which puts the dropdown back if so.
+  rootFolderEl.addEventListener('change', () =>
+    send({ type: 'switchFolder', folder: rootFolderEl.value })
+  );
 
   /** Moving a recurring series' time must move its rule too. */
   function whenPatch(series, iso) {

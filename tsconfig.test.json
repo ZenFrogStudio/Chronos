@@ -13,6 +13,7 @@
   "//": "Modules deliberately kept free of `vscode` so they run in plain Node.",
   "include": [
     "test/**/*.ts",
+    "src/adopt.ts",
     "src/agents.ts",
     "src/command.ts",
     "src/decide.ts",
@@ -26,6 +27,8 @@
     "src/recurrence.ts",
     "src/remote.ts",
     "src/results.ts",
+    "src/roots.ts",
+    "src/state-file.ts",
     "src/time.ts",
     "src/transcript.ts",
     "src/types.ts"
