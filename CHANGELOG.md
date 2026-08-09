@@ -22,6 +22,33 @@ logic out; one of the moves also narrowed a guard.
 
 ### Changed
 
+- **Deleting a plan or a task now archives the file instead of destroying it.**
+  The × on a plan row and the bin in the task inbox both called `unlink`, which
+  has no recycle bin and no undo behind it, on a button that sits at hover height
+  where a misclick is a matter of time. The file now moves instead:
+
+  ```
+  your-project/.chronos/
+    archive/
+      plans/   <- archived plans
+      tasks/   <- archived tasks
+  ```
+
+  A new toolbar button beside **Show results folder** opens that folder, creating
+  it if this folder has never archived anything. Bringing a plan back is the
+  **Import** button you already use for any other file — it copies the plan into
+  the library, where it can be scheduled again. Nothing is ever pruned: there is
+  no retention setting and no cleanup pass, because a plan you wrote is worth
+  more than the bytes it costs to keep. Two plans archived under one title both
+  survive, the second suffixed `-2`.
+
+  Archiving a **scheduled** plan now asks once, with one button, where it used to
+  offer "Delete both" and "Delete plan only". That second option never worked:
+  the library watcher runs `consolidate` when a plan file leaves the folder, and
+  `consolidate` drops every series whose file has gone — so the schedule died
+  about 150ms later whichever button you pressed. The prompt now says plainly
+  that the schedule and its run history go too.
+
 - **Everything Chronos knows is now per folder.** Tasks, plans, schedules, run
   history and transcripts all live in a `.chronos` directory inside the folder
   you are working in, instead of one machine-wide set shared by every project:
@@ -69,6 +96,21 @@ logic out; one of the moves also narrowed a guard.
 - Generating a plan from a task no longer asks which folder to work in on a
   multi-root workspace. The task belongs to a folder now, so that folder is the
   answer.
+
+- **The task inbox is readable and keyboard-driven.** Task text wraps over as
+  many lines as it needs instead of being cut off at the width of an activity-bar
+  panel, which is narrow enough that most tasks ended in an ellipsis — you could
+  not read what you had written down. The row you are working with is marked with
+  an outline, and the arrow keys, Home and End move it; `Enter` generates,
+  `F2` edits and `Delete` removes, so the whole list works without the mouse.
+
+  The per-row **Generate plan** lightbulb is gone, replaced by one full-width
+  button under the list that acts on the selected task. It was the panel's main
+  action and it was a 17px target that only appeared on hover, repeated once per
+  row; now it is one button you can hit, and its tooltip names the task it will
+  plan. Nothing changed on the extension side — the button sends the same message
+  the row button did, and the host still checks the task exists before opening
+  anything.
 
 ### Added
 
@@ -312,6 +354,57 @@ logic out; one of the moves also narrowed a guard.
   different files, so the guard was wider than intended there and would have
   permitted a write to a file the caller never named. Case is now folded only on
   Windows. No change to Windows behaviour.
+
+- **Windows open on different projects each run their own schedule
+  (0.8.0-rc.28).** If two VS Code or VSCodium windows are open on two different
+  projects and only one of them will schedule anything — the other refusing
+  **Run now** and showing a banner about another window — that installation
+  predates the per-folder layout. Everything Chronos writes moved into a
+  `.chronos` directory inside the folder you are working in as of **0.8.0-rc.24**,
+  the scheduler lock along with it, so each window now arbitrates only its own
+  folder. Before that there was a single `scheduler.lock` in extension storage
+  for the whole machine, and exactly one window could hold it no matter what any
+  of them had open. **Anyone still on 0.8.0-rc.20 or earlier must reinstall to
+  get this** — there is no fix available to an older build, because the layout it
+  is using is the problem.
+
+  The lock itself is deliberately kept. It only engages now when two windows are
+  genuinely sharing one dataset — the same folder, or two folder-less windows on
+  the fallback root — and there one scheduler is the right answer: two windows
+  firing the same task means two agents editing one repository at the same
+  moment.
+
+- **Two windows open during the upgrade no longer both adopt the old library.**
+  Adoption — the one-time copy of the machine-wide dataset into the first folder
+  opened after the upgrade — was guarded only by a flag in VS Code's global
+  state, and that flag does not reach another window the moment it is written. So
+  two windows open when the new build first loaded would both see "not adopted
+  yet", and every legacy plan *and its schedule* would land in two different
+  projects, both of which then started firing them. A claim file is now created
+  in the old storage before anything is copied, using an atomic create-or-fail —
+  the same guarantee the schedule's temp-file-and-rename write relies on. The
+  window that loses the race logs that it stood aside and leaves the data alone.
+  The global-state flag is unchanged and still handles the ordinary single-window
+  case without touching the disk.
+
+- **A second window on the same folder can no longer wipe the first one's run
+  history.** The store read `state.json` once at startup and wrote its whole
+  in-memory copy back on every change. With two windows on one folder, the
+  window not holding the lock held a snapshot that went stale the instant the
+  other recorded a run — and its next edit, however small, put that snapshot back
+  over the top, silently destroying every run and schedule change made since.
+  Each change now re-reads the file, applies itself to that, and writes the
+  result, so "last writer wins" is narrowed from the whole file down to the one
+  field being changed. This is not syncing and nothing watches anything: a window
+  still shows what it last read, it simply stops overwriting what it never read.
+
+- **The "another window" banner says which window it means.** It read *"Another
+  VS Code window is running the Chronos scheduler. Nothing will run from this
+  window, and changes made here may not reach it"*, which was written for the old
+  machine-wide lock, where it was true of any other window at all. It can now
+  only mean a second window on this same folder, so it says that and names the
+  folder — and the **Run now** refusal says the same thing. If you ever see it in
+  a window on a different project, that is a bug, and now you can tell.
 
 ### Changed
 
@@ -633,6 +726,22 @@ logic out; one of the moves also narrowed a guard.
   gates in the source; those are different things.
 
 ### Removed
+
+- **The Completed panel at the foot of the plan library (0.8.0-rc.29).** Finished
+  one-shots used to collect in a pinned strip below the plan list, newest first,
+  capped at a third of the panel. It was there so they stopped pushing live plans
+  out of view — but a panel that never empties is permanent furniture for plans
+  with nothing ahead of them. The library is now a single scrolling list of plans
+  that still have a future, and a plan whose one run has finished simply leaves
+  it.
+
+  Nothing is deleted: the plan file stays in the library folder and every run
+  stays under **Runs**. The trade is that the ✎ rename and × delete buttons live
+  on library rows, so a finished plan can no longer be renamed or deleted from
+  inside Chronos — the 📚 *Show library folder* button is the way to do either.
+  Search will not surface a finished plan either, and clicking its run row under
+  **Runs** is how you open it again. A plan mid-run or one that was missed is
+  still shown; neither is finished.
 
 - **The sidebar is no longer a drop target (0.8.0-rc.20).** Dragging a `.md` file
   onto the Tasks view used to schedule it, and a webview cannot accept that drop

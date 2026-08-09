@@ -2,7 +2,7 @@ import { randomUUID } from 'crypto';
 import * as vscode from 'vscode';
 import { pruneRuns } from './history';
 import { log } from './log';
-import { readState, writeState } from './state-file';
+import { readState, updateState } from './state-file';
 import { ChronosState, SCHEMA_VERSION, TaskRun, TaskSeries } from './types';
 
 export function newId(): string {
@@ -71,50 +71,72 @@ export class Store {
   }
 
   async addSeries(series: TaskSeries): Promise<void> {
-    this.state.series.push(series);
-    await this.persist();
+    await this.persist((state) => {
+      state.series.push(series);
+    });
   }
 
   async updateSeries(id: string, patch: Partial<TaskSeries>): Promise<void> {
-    const series = this.getSeriesById(id);
-    if (!series) {
-      log.warn(`updateSeries: no series ${id}`);
-      return;
-    }
-    Object.assign(series, patch);
-    await this.persist();
+    await this.persist((state) => {
+      const series = state.series.find((s) => s.id === id);
+      if (!series) {
+        log.warn(`updateSeries: no series ${id}`);
+        return;
+      }
+      Object.assign(series, patch);
+    });
   }
 
   /** Removes the series and its run history together. */
   async removeSeries(id: string): Promise<void> {
-    this.state.series = this.state.series.filter((s) => s.id !== id);
-    this.state.runs = this.state.runs.filter((r) => r.seriesId !== id);
-    await this.persist();
+    await this.persist((state) => {
+      state.series = state.series.filter((s) => s.id !== id);
+      state.runs = state.runs.filter((r) => r.seriesId !== id);
+    });
   }
 
   async addRun(run: TaskRun): Promise<void> {
-    this.state.runs.push(run);
-    await this.persist();
+    await this.persist((state) => {
+      state.runs.push(run);
+    });
   }
 
   async updateRun(id: string, patch: Partial<TaskRun>): Promise<void> {
-    const run = this.getRunById(id);
-    if (!run) {
-      log.warn(`updateRun: no run ${id}`);
-      return;
-    }
-    Object.assign(run, patch);
-    await this.persist();
+    await this.persist((state) => {
+      const run = state.runs.find((r) => r.id === id);
+      if (!run) {
+        log.warn(`updateRun: no run ${id}`);
+        return;
+      }
+      Object.assign(run, patch);
+    });
   }
 
   async removeRun(id: string): Promise<void> {
-    this.state.runs = this.state.runs.filter((r) => r.id !== id);
-    await this.persist();
+    await this.persist((state) => {
+      state.runs = state.runs.filter((r) => r.id !== id);
+    });
   }
 
-  private async persist(): Promise<void> {
-    this.state.runs = pruneRuns(this.state.runs);
-    writeState(this.file, this.state);
+  /**
+   * Applies one change to the file rather than to the copy in memory.
+   *
+   * Every mutator above is id-and-patch shaped, which is what lets this re-read
+   * before it writes instead of merging two schedules: the change is applied to
+   * whatever is on disk now, so a second window on this folder cannot put its
+   * stale snapshot back over the scheduling window's run history. See
+   * `updateState` for why that matters.
+   *
+   * The re-read hands back new objects, so `getSeries()` and `getRuns()` are
+   * snapshots for reading — a caller that assigned to one of them and expected
+   * the change to stick would be writing to a discarded copy. None do; every
+   * edit in Chronos goes through a mutator here.
+   */
+  private async persist(change: (state: ChronosState) => void): Promise<void> {
+    this.state = updateState(this.file, (state) => {
+      change(state);
+      state.runs = pruneRuns(state.runs);
+    });
     this.emitter.fire();
   }
 }

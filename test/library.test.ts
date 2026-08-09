@@ -4,6 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import {
+  archivePlan,
   createPlan,
   duplicatePlan,
   ensureLibrary,
@@ -338,6 +339,68 @@ describe('library CRUD', () => {
     removePlan(dir, plan.name);
 
     assert.deepEqual(listPlans(dir), []);
+  });
+});
+
+describe('archivePlan', () => {
+  // Deleting moves the file here instead of unlinking it, so a misclick on a
+  // hover-height button costs a re-import rather than the writing.
+  let archive: string;
+
+  beforeEach(() => {
+    archive = path.join(dir, 'archive');
+  });
+
+  it('should_move_the_plan_out_of_the_library_and_into_the_archive', () => {
+    const plan = createPlan(dir, 'Doomed');
+
+    const archived = archivePlan(dir, archive, plan.name);
+
+    assert.equal(archived.name, 'doomed.md');
+    assert.equal(fs.existsSync(plan.filePath), false, 'the plan is still in the library');
+    assert.equal(fs.existsSync(path.join(archive, 'doomed.md')), true);
+    assert.deepEqual(listPlans(dir), []);
+  });
+
+  it('should_create_the_archive_when_it_does_not_exist_yet', () => {
+    // Made on demand rather than by `ensureRoot`, so most folders never get one.
+    const plan = createPlan(dir, 'First');
+
+    assert.equal(fs.existsSync(archive), false);
+    archivePlan(dir, archive, plan.name);
+
+    assert.equal(fs.statSync(archive).isDirectory(), true);
+  });
+
+  it('should_keep_both_when_two_archived_plans_share_a_name', () => {
+    // The second must cost a suffix, never the copy already archived.
+    archivePlan(dir, archive, createPlan(dir, 'Notes', 'the first one').name);
+    const second = archivePlan(dir, archive, createPlan(dir, 'Notes', 'the second one').name);
+
+    assert.equal(second.name, 'notes-2.md');
+    assert.equal(readPlan(archive, 'notes.md'), 'the first one');
+    assert.equal(readPlan(archive, 'notes-2.md'), 'the second one');
+  });
+
+  it('should_refuse_to_archive_a_file_outside_the_library', () => {
+    const outside = path.join(dir, '..', `sibling-${Date.now()}.md`);
+    fs.writeFileSync(outside, 'keep me');
+
+    try {
+      assert.throws(() => archivePlan(dir, archive, `../${path.basename(outside)}`));
+      assert.equal(fs.existsSync(outside), true);
+    } finally {
+      fs.rmSync(outside, { force: true });
+    }
+  });
+
+  it('should_carry_the_contents_across_unchanged', () => {
+    const body = '# Deploy\n\nRun the thing.\r\n\tindented\n';
+    const plan = createPlan(dir, 'Deploy', body);
+
+    const archived = archivePlan(dir, archive, plan.name);
+
+    assert.equal(fs.readFileSync(archived.filePath, 'utf8'), body);
   });
 });
 

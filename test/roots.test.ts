@@ -29,6 +29,9 @@ describe('pathsFor', () => {
     assert.equal(paths.pending, path.join(root, '.pending'));
     assert.equal(paths.results, path.join(root, 'results'));
     assert.equal(paths.logs, path.join(root, 'logs'));
+    assert.equal(paths.archive, path.join(root, 'archive'));
+    assert.equal(paths.archivedPlans, path.join(root, 'archive', 'plans'));
+    assert.equal(paths.archivedTasks, path.join(root, 'archive', 'tasks'));
   });
 
   it('should_keep_two_folders_data_apart', () => {
@@ -51,6 +54,17 @@ describe('ensureRoot', () => {
     for (const dir of [paths.root, paths.plans, paths.tasks, paths.results, paths.logs]) {
       assert.ok(fs.statSync(dir).isDirectory(), `${dir} was not created`);
     }
+  });
+
+  it('should_not_create_the_archive_until_something_is_archived', () => {
+    // The archive is made on demand, by the first archive and by the reveal
+    // button. An empty `archive/` in every folder Chronos has ever opened is
+    // clutter for a feature most folders never use.
+    const paths = pathsFor(folder);
+
+    ensureRoot(paths);
+
+    assert.equal(fs.existsSync(paths.archive), false, 'ensureRoot created the archive');
   });
 
   it('should_report_true_only_the_first_time', () => {

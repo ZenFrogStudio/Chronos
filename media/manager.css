@@ -57,7 +57,6 @@ body.vscode-high-contrast-light {
 /* The two-typeface rule: prose is set in the UI font, every measurement — time,
    duration, cost, path, label — is set in the editor font. If it is data, it is
    in the code font. */
-.plan-group,
 .library-title,
 .section-title,
 .field-label,
@@ -212,16 +211,6 @@ body.dragging .drop-overlay {
   padding: 6px;
 }
 
-.plan-group {
-  margin: 6px 0 2px;
-  padding: 0 6px;
-  font-size: 0.7em;
-  font-weight: 600;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--muted);
-}
-
 /* The row actions are laid over the row rather than beside it, so adding them
    does not change how a plan name is measured or where it truncates. */
 .plan-row {
@@ -310,15 +299,6 @@ body.dragging .drop-overlay {
   box-shadow: inset 2px 0 0 var(--sodium);
 }
 
-/* Completed plans stay legible but recede — the groups above are the live ones. */
-.plan-item.is-done .plan-name {
-  color: var(--muted);
-}
-
-.plan-item.is-done.is-selected .plan-name {
-  color: inherit;
-}
-
 .plan-name {
   display: block;
   overflow: hidden;
@@ -344,24 +324,6 @@ body.dragging .drop-overlay {
 .plan-item .plan-meta.is-live { color: var(--ok); }
 .plan-item .plan-meta.is-idle { color: var(--sodium); }
 .plan-item .plan-meta.is-missed { color: var(--danger); }
-
-/* Pinned under the scrolling list rather than inside it: finished plans neither
-   push the live ones out of view nor scroll away themselves. Capped so a long
-   pile takes a third of the panel at most, and scrolls within that. */
-.completed {
-  display: flex;
-  flex-direction: column;
-  flex: none;
-  min-height: 0;
-  max-height: 33%;
-  padding: 2px 6px 6px;
-  border-top: 1px solid var(--border);
-}
-
-.completed-list {
-  min-height: 0;
-  overflow-y: auto;
-}
 
 /* Two rarely-used utility actions, reduced to codicons: they sit beside the
    buttons that create plans, but stay muted so they do not compete with them. */
@@ -510,12 +472,6 @@ body.dragging .drop-overlay {
 
 .section-head .section-title {
   margin: 0;
-}
-
-.section-actions {
-  display: flex;
-  align-items: center;
-  gap: 10px;
 }
 
 .grid {

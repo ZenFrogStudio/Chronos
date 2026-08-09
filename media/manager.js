@@ -3,8 +3,6 @@
   const vscode = acquireVsCodeApi();
 
   const listEl = /** @type {HTMLElement} */ (document.getElementById('plan-list'));
-  const completedEl = /** @type {HTMLElement} */ (document.getElementById('completed'));
-  const completedListEl = /** @type {HTMLElement} */ (document.getElementById('completed-list'));
   const detailEl = /** @type {HTMLElement} */ (document.getElementById('detail'));
   const noticeEl = /** @type {HTMLElement} */ (document.getElementById('notice'));
   const setupEl = /** @type {HTMLElement} */ (document.getElementById('setup'));
@@ -335,6 +333,11 @@
     }
   }
 
+  /** Last segment of the active folder's path, for messages that name it. */
+  function folderName() {
+    return state.activeFolder.split(/[\\/]/).filter(Boolean).pop() || state.activeFolder;
+  }
+
   function render() {
     withFocusPreserved(() => {
       renderFolders();
@@ -352,9 +355,12 @@
       setupEl.textContent = `Chronos cannot reach the Claude CLI. ${state.setupProblem}`;
       setupEl.hidden = false;
     } else if (state.schedulerElsewhere) {
+      // The folder is named because, now that Chronos data is per folder, this
+      // can only mean a second window on *this* folder. Seeing it in a window on
+      // a different project would be a bug, and you should be able to tell.
       setupEl.textContent =
-        'Another VS Code window is running the Chronos scheduler. ' +
-        'Nothing will run from this window, and changes made here may not reach it.';
+        `Another window is open on this same folder (${folderName()}) and is running its ` +
+        'schedule. Nothing will run from this window.';
       setupEl.hidden = false;
     } else {
       setupEl.hidden = true;
@@ -393,30 +399,16 @@
   function renderList() {
     const term = searchEl.value.trim().toLowerCase();
     const match = (p) => !term || p.title.toLowerCase().includes(term);
-    const live = (p) => match(p) && !isDone(p);
 
-    const plans = state.plans.filter(live);
-
-    // Done plans move out, newest first. They render into their own pinned region
-    // at the foot of the panel rather than into the scrolling list, so a growing
-    // pile of them never pushes the live plans out of view.
-    const done = state.plans
-      .filter((p) => match(p) && isDone(p))
-      .sort((a, b) =>
-        recencyOf(lastRun(seriesForPlan(b))).localeCompare(recencyOf(lastRun(seriesForPlan(a))))
-      );
-
-    completedEl.hidden = !done.length;
-    completedListEl.innerHTML = done.map(planItem).join('');
+    // A finished one-shot has no future, so it drops out of the library
+    // altogether. Its runs stay under Runs, and its file stays in the library
+    // folder.
+    const plans = state.plans.filter((p) => match(p) && !isDone(p));
 
     if (!plans.length) {
-      // With nothing live but something completed, the pinned region below is
-      // already the answer — an empty-state above it would contradict it.
-      listEl.innerHTML = done.length
-        ? ''
-        : `<p class="empty">${
-            term ? 'No plans match.' : 'No plans yet.<br />Create one to get started.'
-          }</p>`;
+      listEl.innerHTML = `<p class="empty">${
+        term ? 'No plans match.' : 'No plans yet.<br />Create one to get started.'
+      }</p>`;
       return;
     }
 
@@ -440,8 +432,7 @@
     if (run.status === 'pending') return 'Queued';
     if (run.status === 'running') return 'Running now';
     if (run.status === 'missed') return 'Missed';
-    // Under the Completed heading "Ran once" would only repeat it, so say when.
-    return formatWhen(recencyOf(run));
+    return 'Ran once';
   }
 
   /**
@@ -473,17 +464,16 @@
     const classes = [
       'plan-item',
       plan.name === selected ? 'is-selected' : '',
-      isRunning(series) ? 'is-running' : '',
-      isDone(plan) ? 'is-done' : ''
+      isRunning(series) ? 'is-running' : ''
     ].join(' ');
 
     const actions = `<span class="plan-actions">
         <button class="plan-action" type="button" data-action="rename"
           data-name="${esc(plan.name)}" data-focus-key="rename-${esc(plan.name)}"
           title="Rename plan" aria-label="Rename ${esc(plan.title)}">&#9998;</button>
-        <button class="plan-action is-danger" type="button" data-action="remove"
-          data-name="${esc(plan.name)}" data-focus-key="remove-${esc(plan.name)}"
-          title="Delete plan" aria-label="Delete ${esc(plan.title)}">&#215;</button>
+        <button class="plan-action is-danger" type="button" data-action="archive"
+          data-name="${esc(plan.name)}" data-focus-key="archive-${esc(plan.name)}"
+          title="Archive plan" aria-label="Archive ${esc(plan.title)}"><i class="codicon codicon-archive"></i></button>
       </span>`;
 
     // A row is a wrapper holding several buttons rather than one button, because
@@ -793,19 +783,10 @@
   }
 
   function editorSection(s) {
-    // Planning is always a Claude session, whatever the series runs on — so an
-    // opencode model id is not the thing to name here.
-    const pinned = (s && agentIdOf(s) === 'claude' && s.model) || '';
-    const known = modelsOf(s).find((m) => m.value === pinned);
-    const model = pinned ? (known ? known.label : pinned) : 'your default model';
     return `<div class="section">
       <div class="section-head">
         <h3 class="section-title">Plan text</h3>
-        <div class="section-actions">
-          <button class="button is-quiet" type="button" data-action="generate-plan"
-            title="Open a terminal running ${esc(model)} in plan mode, and plan from this text">Generate plan</button>
-          <button class="link-button" type="button" data-action="open-editor">Open in editor ↗</button>
-        </div>
+        <button class="link-button" type="button" data-action="open-editor">Open in editor ↗</button>
       </div>
       <textarea class="editor" data-field="editor" data-focus-key="editor"
         spellcheck="false" aria-label="Plan text"></textarea>
@@ -1075,7 +1056,7 @@
 
   // ---------- events ----------
 
-  /** Shared, because the completed plans sit outside the scrolling list. */
+  /** Select, rename or delete, from whichever plan row was clicked. */
   function planClick(e) {
     const el = /** @type {HTMLElement} */ (e.target).closest('[data-action]');
     if (!el) return;
@@ -1084,12 +1065,12 @@
 
     // A queued save would write the file back moments after the delete removed
     // it, so a pending edit to this plan is dropped rather than resurrected.
-    if (action === 'remove') {
+    if (action === 'archive') {
       if (editor.name === name) {
         clearTimeout(saveTimer);
         editor.dirty = false;
       }
-      return send({ type: 'deletePlan', name });
+      return send({ type: 'archivePlan', name });
     }
 
     // The opposite of delete: a rename moves the file, so anything typed has to
@@ -1105,7 +1086,6 @@
   }
 
   listEl.addEventListener('click', planClick);
-  completedListEl.addEventListener('click', planClick);
 
   searchEl.addEventListener('input', renderList);
 
@@ -1200,10 +1180,6 @@
     const series = seriesForPlan(plan);
 
     if (action === 'open-editor') return send({ type: 'openInEditor', name: plan.name });
-    if (action === 'generate-plan') {
-      saveNow(); // Claude reads the file, so what is on screen must be on disk
-      return send({ type: 'generatePlan', name: plan.name, seriesId: series && series.id });
-    }
     // Before the `!series` guard: with nothing scheduled, this is what creates it.
     // Resuming a spent one-shot has to clear `spent`, or it will never fire.
     if (action === 'schedule-toggle') {
@@ -1359,6 +1335,7 @@
   document.getElementById('import-plan').addEventListener('click', () => send({ type: 'importPlan' }));
   document.getElementById('reveal-library').addEventListener('click', () => send({ type: 'revealLibrary' }));
   document.getElementById('reveal-results').addEventListener('click', () => send({ type: 'revealResults' }));
+  document.getElementById('reveal-archive').addEventListener('click', () => send({ type: 'revealArchive' }));
 
   // The host may refuse — a run in flight belongs to the folder being left — and
   // answers either way with a fresh state, which puts the dropdown back if so.

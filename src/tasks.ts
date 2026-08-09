@@ -202,8 +202,8 @@ export class TaskView implements vscode.WebviewViewProvider, vscode.Disposable {
         return;
       }
 
-      // Always asks: `removePlan` unlinks rather than recycling, and this sits on
-      // a hover-height button where a misclick costs the file.
+      // Always asks: this sits on a hover-height button where a misclick costs
+      // the row. The file itself survives, in the folder's archive.
       case 'deleteTask': {
         const task = this.list().find((t) => t.name === message.name);
         if (!task) {
@@ -211,14 +211,14 @@ export class TaskView implements vscode.WebviewViewProvider, vscode.Disposable {
           return;
         }
         const choice = await vscode.window.showWarningMessage(
-          `Delete "${task.label}"?`,
-          { modal: true, detail: 'The file is deleted, not moved to the recycle bin.' },
-          'Delete'
+          `Archive "${task.label}"?`,
+          { modal: true, detail: 'The file moves to .chronos/archive.' },
+          'Archive'
         );
         if (!choice) {
           return;
         }
-        library.removePlan(dir, task.name);
+        library.archivePlan(dir, this.paths().archivedTasks, task.name);
         this.post();
         return;
       }

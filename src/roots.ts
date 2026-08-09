@@ -31,6 +31,10 @@ export interface ChronosPaths {
   pending: string;
   results: string;
   logs: string;
+  /** Plans and tasks removed from the library. Kept, never pruned. */
+  archive: string;
+  archivedPlans: string;
+  archivedTasks: string;
 }
 
 export function pathsFor(folder: string): ChronosPaths {
@@ -44,7 +48,10 @@ export function pathsFor(folder: string): ChronosPaths {
     tasks: path.join(root, 'tasks'),
     pending: path.join(root, '.pending'),
     results: path.join(root, 'results'),
-    logs: path.join(root, 'logs')
+    logs: path.join(root, 'logs'),
+    archive: path.join(root, 'archive'),
+    archivedPlans: path.join(root, 'archive', 'plans'),
+    archivedTasks: path.join(root, 'archive', 'tasks')
   };
 }
 

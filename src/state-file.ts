@@ -62,6 +62,29 @@ export function readState(file: string): ReadResult {
 }
 
 /**
+ * Read, change, write — never write back from a snapshot.
+ *
+ * Two windows open on the same folder each hold their own copy of this file,
+ * and neither is told when the other writes. A window that persisted its
+ * in-memory copy would put back everything it had never seen: every run the
+ * scheduling window recorded since, and every schedule change with it, silently
+ * gone. Re-reading first costs one small read per edit, and narrows "last writer
+ * wins" from the whole file down to the field actually being changed.
+ *
+ * This is not syncing. A window still shows what it last read; it just stops
+ * overwriting what it never read.
+ */
+export function updateState(
+  file: string,
+  change: (state: ChronosState) => void
+): ChronosState {
+  const { state } = readState(file);
+  change(state);
+  writeState(file, state);
+  return state;
+}
+
+/**
  * Writes through a temp file and a rename. A rename is atomic on both NTFS and
  * ext4, so a crash mid-write leaves either the old schedule or the new one —
  * never a truncated file that reads as "every task has been deleted".

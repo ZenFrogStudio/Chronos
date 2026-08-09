@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { adoptGlobal } from './adopt';
+import { adoptGlobal, claimAdoption } from './adopt';
 import { AGENTS } from './agents';
 import { consolidate } from './consolidate';
 import { seedLibrary } from './library';
@@ -230,8 +230,14 @@ function resolvePaths(folder: string): ChronosPaths {
  *
  * Splitting it by folder automatically would be guesswork — a plan file says
  * nothing about which repository it belongs to — so it all lands in one place
- * and the user moves plans on from there. Runs once ever, guarded by a flag in
- * global state, and copies rather than moves: the old storage is left intact.
+ * and the user moves plans on from there. Runs once ever, and copies rather than
+ * moves: the old storage is left intact.
+ *
+ * Two gates, because there are two ways to run twice. The flag in global state
+ * covers the ordinary case of this window activating again, and answers without
+ * touching the disk. The marker file covers the case the flag cannot see: a
+ * second window activating on the new build at the same moment, before the flag
+ * it writes has reached anyone else.
  */
 function adoptOnce(context: vscode.ExtensionContext, next: ChronosPaths): void {
   if (context.globalState.get<string>(ADOPTED_KEY) || fs.existsSync(next.state)) {
@@ -256,6 +262,16 @@ function adoptOnce(context: vscode.ExtensionContext, next: ChronosPaths): void {
     // Nothing to adopt — a fresh install. Flag it anyway, so a plan later
     // dropped into the old location is never hoovered up by surprise.
     void context.globalState.update(ADOPTED_KEY, next.folder);
+    return;
+  }
+
+  // Staked before a single file is copied. Claiming it afterwards would leave
+  // the whole copy inside the race it is meant to close.
+  if (!claimAdoption(context.globalStorageUri.fsPath)) {
+    log.info(
+      'another window is adopting the previous machine-wide Chronos data — ' +
+        'leaving it to that one, so it is not copied into two projects at once'
+    );
     return;
   }
 

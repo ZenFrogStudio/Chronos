@@ -30,6 +30,34 @@ export interface LegacyPaths {
   results: string;
 }
 
+/** The claim file, left in the old machine-wide storage. See `claimAdoption`. */
+export const ADOPTION_MARKER = 'adopted.marker';
+
+/**
+ * Decides which single window gets to adopt, when several are open.
+ *
+ * The flag in `globalState` that guards adoption does not reach another window
+ * the instant it is set, so two windows open at the moment the new build first
+ * loads would both read "not adopted yet" and both copy the whole legacy
+ * library — every plan *and its schedule* — into two different projects, which
+ * then both start firing them. The old storage is the contended thing, so the
+ * claim is staked there rather than in either folder.
+ *
+ * `wx` is create-or-fail in one operation, the same atomicity `state-file.ts`
+ * relies on for its rename. Whichever window loses simply leaves the data alone.
+ */
+export function claimAdoption(legacyStorage: string): boolean {
+  try {
+    // VS Code creates global storage lazily, and a missing directory here would
+    // read as "somebody else claimed it" and strand the data forever.
+    fs.mkdirSync(legacyStorage, { recursive: true });
+    fs.closeSync(fs.openSync(path.join(legacyStorage, ADOPTION_MARKER), 'wx'));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export interface AdoptionReport {
   plans: number;
   tasks: number;

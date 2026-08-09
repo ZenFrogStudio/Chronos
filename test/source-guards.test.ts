@@ -66,6 +66,32 @@ describe('source guards', () => {
     assert.deepEqual(missing, [], `manager.ts never replaces: ${missing.join(', ')}`);
   });
 
+  it('should_replace_every_placeholder_tasks_html_contains', () => {
+    // The task view is rendered the same way and fails the same silently: an
+    // unreplaced {{styleUri}} leaves the inbox unstyled with nothing in the log.
+    const html = fs.readFileSync(path.join(MEDIA, 'tasks.html'), 'utf8');
+    const tasks = fs.readFileSync(path.join(SRC, 'tasks.ts'), 'utf8');
+
+    const missing = [...new Set(html.match(/\{\{\w+\}\}/g) ?? [])].filter(
+      (token) => !tasks.includes(`replaceAll('${token}'`)
+    );
+
+    assert.deepEqual(missing, [], `tasks.ts never replaces: ${missing.join(', ')}`);
+  });
+
+  it('should_ship_the_codicons_the_task_view_asks_for', () => {
+    // Both files, because the inbox names glyphs in two places: the rows are
+    // built in JS, the Generate button is in the HTML.
+    const css = fs.readFileSync(path.join(MEDIA, 'codicon.css'), 'utf8');
+    const markup = ['tasks.html', 'tasks.js']
+      .map((file) => fs.readFileSync(path.join(MEDIA, file), 'utf8'))
+      .join('\n');
+
+    for (const name of markup.match(/codicon-[\w-]+/g) ?? []) {
+      assert.ok(css.includes(`.${name}:before`), `${name} is not in media/codicon.css`);
+    }
+  });
+
   it('should_ship_the_codicon_font_the_manager_asks_for', () => {
     // The webview may only load from media/, and the .vsix excludes
     // node_modules/, so these two are vendored rather than built. If either goes

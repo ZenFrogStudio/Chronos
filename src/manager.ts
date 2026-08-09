@@ -3,12 +3,11 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { buildActivity } from './activity';
-import { AGENTS, agentFor, DEFAULT_AGENT } from './agents';
+import { AGENTS, DEFAULT_AGENT } from './agents';
 import { consolidate } from './consolidate';
 import { seriesEdit } from './edit';
 import * as library from './library';
 import { log, logConsolidation } from './log';
-import { generateCommand, shellKind } from './launch';
 import { ChronosPaths } from './roots';
 import { Scheduler } from './scheduler';
 import { createSeries, defaultCwd } from './series';
@@ -22,7 +21,7 @@ type Inbound =
   | { type: 'dropText'; files: { name: string; text: string }[] }
   | { type: 'createPlan' }
   | { type: 'renamePlan'; name: string }
-  | { type: 'deletePlan'; name: string }
+  | { type: 'archivePlan'; name: string }
   | { type: 'loadPlan'; name: string }
   | { type: 'savePlan'; name: string; text: string }
   | { type: 'openInEditor'; name: string }
@@ -32,12 +31,12 @@ type Inbound =
   | { type: 'updateSeries'; id: string; patch: Partial<TaskSeries> }
   | { type: 'removeSeries'; id: string }
   | { type: 'browseCwd'; id: string }
-  | { type: 'generatePlan'; name: string; seriesId?: string }
   | { type: 'runNow'; seriesId: string; dismissRunId?: string }
   | { type: 'cancelRun'; id: string }
   | { type: 'dismissRun'; id: string }
   | { type: 'openResult'; id: string }
   | { type: 'revealResults' }
+  | { type: 'revealArchive' }
   | { type: 'openLog'; id: string }
   | { type: 'switchFolder'; folder: string };
 
@@ -306,8 +305,8 @@ export class Manager implements vscode.Disposable {
         return;
       }
 
-      case 'deletePlan':
-        return this.deletePlan(dir, message.name);
+      case 'archivePlan':
+        return this.archivePlan(dir, message.name);
 
       case 'loadPlan':
         this.sendText(dir, message.name);
@@ -391,13 +390,14 @@ export class Manager implements vscode.Disposable {
         return;
       }
 
-      case 'generatePlan':
-        return this.generatePlan(library.planPath(dir, message.name), message.seriesId);
-
       case 'runNow':
         if (!this.scheduler.leading) {
+          // Names the folder for the reason the banner in manager.js does: with
+          // per-folder data this can only be a second window on this one folder.
           this.notify(
-            'Another VS Code window is running the Chronos scheduler. Use that window, or close it.'
+            `Another window is open on this same folder (${path.basename(this.paths().folder)}) ` +
+              'and is running its schedule. Nothing will run from this window — use that ' +
+              'window, or close it.'
           );
           return;
         }
@@ -434,6 +434,13 @@ export class Manager implements vscode.Disposable {
         return;
       }
 
+      case 'revealArchive': {
+        const archive = this.paths().archive;
+        fs.mkdirSync(archive, { recursive: true });
+        await vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(archive));
+        return;
+      }
+
       case 'openLog': {
         const run = this.store.getRunById(message.id);
         if (!run?.logPath || !fs.existsSync(run.logPath)) {
@@ -452,86 +459,42 @@ export class Manager implements vscode.Disposable {
   }
 
   /**
-   * Opens an interactive plan-mode session on a plan file. A real terminal, not
-   * the runner's read-only pty — the point is to talk to Claude — so this is
-   * outside the scheduler entirely: no concurrency slot, no run record, no
-   * transcript.
+   * Still asks, because this sits on a hover-height button on a list row and the
+   * plan disappears from the library either way. One button, not two: a plan
+   * whose file leaves the folder loses its schedule regardless — the watcher
+   * above runs `consolidate` a moment later, and that drops every series whose
+   * file has gone — so offering to keep the schedule would be offering something
+   * that does not survive the next tick.
    */
-  private async generatePlan(filePath: string, seriesId?: string): Promise<void> {
-    if (!fs.existsSync(filePath)) {
-      return this.notify('That file no longer exists.');
-    }
-    if (!fs.readFileSync(filePath, 'utf8').trim()) {
-      return this.notify('This plan is empty. Write what you want Claude to plan from first.');
-    }
-
-    const series = seriesId ? this.store.getSeriesById(seriesId) : undefined;
-    const cwd = series && fs.existsSync(series.cwd) ? series.cwd : defaultCwd(filePath);
-
-    const command = generateCommand({
-      exe: vscode.workspace
-        .getConfiguration('chronos')
-        .get<string>('claudePath', 'claude'),
-      sourcePath: filePath,
-      allowDir: path.dirname(filePath),
-      // Planning is always a Claude session, so a series pinned to another
-      // engine contributes no model — its id would mean nothing to `claude`.
-      model: agentFor(series?.agent).id === 'claude' ? series?.model : undefined,
-      shell: shellKind(vscode.env.shell, process.platform)
-    });
-
-    const terminal = vscode.window.createTerminal({
-      name: `Chronos: plan ${path.basename(filePath, '.md')}`,
-      cwd,
-      iconPath: new vscode.ThemeIcon('lightbulb')
-    });
-    // Focus, unlike a scheduled run: you pressed a button and are about to type.
-    terminal.show();
-    terminal.sendText(command);
-    log.info(`opened a planning session for ${path.basename(filePath)} in ${cwd}`);
-  }
-
-  /**
-   * Always asks, and says plainly that the file goes for good — `removePlan`
-   * unlinks rather than recycling, and this is reachable from a hover-height X
-   * on a list row, where a misclick costs the file. A scheduled plan asks a
-   * second question on top: its schedule is destroyed too, and that is not
-   * something the file list shows.
-   */
-  private async deletePlan(dir: string, name: string): Promise<void> {
+  private async archivePlan(dir: string, name: string): Promise<void> {
     const filePath = path.join(dir, name);
     const scheduled = this.store
       .getSeries()
       .filter((s) => library.samePath(s.filePath, filePath));
 
-    if (scheduled.length > 0) {
-      const choice = await vscode.window.showWarningMessage(
-        `"${name}" is scheduled. Delete the plan and its schedule?`,
-        { modal: true, detail: 'The file is deleted, not moved to the recycle bin.' },
-        'Delete both',
-        'Delete plan only'
-      );
-      if (!choice) {
-        return;
-      }
-      if (choice === 'Delete both') {
-        for (const series of scheduled) {
-          await this.store.removeSeries(series.id);
-        }
-      }
-    } else {
-      const choice = await vscode.window.showWarningMessage(
-        `Delete "${name}"?`,
-        { modal: true, detail: 'The file is deleted, not moved to the recycle bin.' },
-        'Delete'
-      );
-      if (!choice) {
-        return;
-      }
+    const detail = 'The file moves to .chronos/archive. Bring it back with Import.';
+    const choice = await vscode.window.showWarningMessage(
+      scheduled.length > 0 ? `"${name}" is scheduled. Archive it?` : `Archive "${name}"?`,
+      {
+        modal: true,
+        detail:
+          scheduled.length > 0
+            ? `${detail} Its schedule and run history are removed.`
+            : detail
+      },
+      'Archive'
+    );
+    if (!choice) {
+      return;
     }
 
-    library.removePlan(dir, name);
+    for (const series of scheduled) {
+      await this.store.removeSeries(series.id);
+    }
+
+    library.archivePlan(dir, this.paths().archivedPlans, name);
     this.post();
+    this.notify(`Archived ${library.titleOf(name)} to .chronos/archive/plans — Import brings it back.`);
   }
 
   /** A renamed plan must not strand the series pointing at its old path. */

@@ -3,19 +3,22 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
-import { adoptGlobal, LegacyPaths } from '../src/adopt';
+import { adoptGlobal, claimAdoption, LegacyPaths } from '../src/adopt';
 import { ensureRoot, pathsFor } from '../src/roots';
 import { ChronosPaths } from '../src/roots';
 import { ChronosState, SCHEMA_VERSION, TaskSeries } from '../src/types';
 
 let tmp: string;
+/** The old machine-wide storage root — what every window shares. */
+let storage: string;
 let legacy: LegacyPaths;
 let next: ChronosPaths;
 
 beforeEach(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'chronos-adopt-'));
 
-  const old = path.join(tmp, 'globalStorage', 'plans');
+  storage = path.join(tmp, 'globalStorage');
+  const old = path.join(storage, 'plans');
   legacy = {
     plans: old,
     tasks: path.join(old, 'tasks'),
@@ -194,5 +197,54 @@ describe('adoptGlobal', () => {
     const { report } = adoptGlobal(legacy, next, undefined);
 
     assert.equal(report.results, false);
+  });
+});
+
+describe('claimAdoption', () => {
+  /**
+   * What `adoptOnce` in extension.ts does, minus the `globalState` flag — that
+   * flag is the gate this one exists to back up, and it needs `vscode`.
+   */
+  function windowActivates(): boolean {
+    if (!claimAdoption(storage)) {
+      return false;
+    }
+    adoptGlobal(legacy, next, undefined);
+    return true;
+  }
+
+  it('should_let_the_first_window_to_ask_adopt', () => {
+    legacyPlan('nightly-audit.md');
+
+    assert.equal(windowActivates(), true);
+    assert.deepEqual(fs.readdirSync(next.plans), ['nightly-audit.md']);
+  });
+
+  it('should_copy_nothing_for_a_second_window_that_asks_after_the_first', () => {
+    // Two windows open when the new build first loads. Without the claim both
+    // read "not adopted yet" and every plan lands in two projects at once, each
+    // with its schedule, each window then firing it.
+    legacyPlan('nightly-audit.md');
+    windowActivates();
+
+    assert.equal(windowActivates(), false);
+    assert.deepEqual(fs.readdirSync(next.plans), ['nightly-audit.md']);
+  });
+
+  it('should_claim_in_the_shared_storage_rather_than_the_folder_being_adopted_into', () => {
+    // The old storage is the contended thing — a marker inside one project's
+    // .chronos would say nothing to a window opened on another project.
+    claimAdoption(storage);
+
+    assert.ok(fs.existsSync(path.join(storage, 'adopted.marker')));
+    assert.ok(!fs.existsSync(path.join(next.root, 'adopted.marker')));
+  });
+
+  it('should_create_a_global_storage_directory_vs_code_has_not_made_yet', () => {
+    // A missing directory would fail the open, read as "somebody else claimed
+    // it", and strand the legacy data forever.
+    const unmade = path.join(tmp, 'never-created');
+
+    assert.equal(claimAdoption(unmade), true);
   });
 });

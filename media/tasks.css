@@ -97,6 +97,26 @@ body.vscode-high-contrast-light {
   outline-offset: 1px;
 }
 
+/* The one action the panel is for, at full width under the list. */
+.button.is-wide {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 7px 10px;
+}
+
+.button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Nothing to generate from, so the hover must not suggest otherwise. */
+.button:disabled:hover {
+  background: var(--vscode-button-background);
+}
+
 /* --- The list --- */
 
 .task-list {
@@ -106,15 +126,19 @@ body.vscode-high-contrast-light {
 }
 
 /* The row actions are laid over the row rather than beside it, so adding them
-   does not change where the task text truncates. */
+   does not change where the task text wraps. Top-aligned because the text is
+   several lines on a narrow sidebar and the dot and buttons belong to the
+   first one. The transparent border is the selected row's border, reserved so
+   selecting a row does not shift it. */
 .task-row {
   position: relative;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
-  /* The right padding is the action buttons' lane: long text must ellipsise
+  /* The right padding is the action buttons' lane: wrapped text must break
      before it reaches them rather than run underneath. */
-  padding: 5px 62px 5px 8px;
+  padding: 5px 44px 5px 8px;
+  border: 1px solid transparent;
   border-radius: var(--radius);
 }
 
@@ -122,12 +146,19 @@ body.vscode-high-contrast-light {
   background: var(--vscode-list-hoverBackground);
 }
 
+/* An outline rather than a fill: the row is marked, not repainted. Same colour
+   as the manager's selected plan, so the two panes agree. The selected row is
+   also the focused one, so it carries no separate focus ring. */
+.task-row.is-selected {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+}
+
+/* Wraps rather than truncating — you cannot act on a task you cannot read. An
+   unbroken path or URL breaks mid-token instead of forcing a sideways scroll. */
 .task-label {
   flex: 1;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .task-edit {
@@ -146,6 +177,8 @@ body.vscode-high-contrast-light {
 .task-dot {
   flex: none;
   position: relative;
+  /* Centres on the first line of a wrapped label rather than on the block. */
+  margin-top: 4px;
   width: 9px;
   height: 9px;
   border: 1.5px solid var(--muted);
@@ -176,17 +209,18 @@ body.vscode-high-contrast-light {
 
 .task-actions {
   position: absolute;
-  top: 50%;
+  top: 4px;
   right: 6px;
-  transform: translateY(-50%);
   display: flex;
   gap: 2px;
   opacity: 0;
   transition: opacity 200ms ease-in-out;
 }
 
-/* Hidden until wanted, but never hidden from the keyboard. */
+/* Hidden until wanted, but never hidden from the keyboard, and always shown on
+   the selected row — that is the one you are working with. */
 .task-row:hover .task-actions,
+.task-row.is-selected .task-actions,
 .task-actions:focus-within {
   opacity: 1;
 }
@@ -214,6 +248,12 @@ body.vscode-high-contrast-light {
 .task-action.is-danger:hover {
   background: color-mix(in srgb, var(--danger) 22%, transparent);
   color: var(--danger);
+}
+
+/* body is a flex column and the list takes the slack, so the bar pins under it. */
+.generate-bar {
+  flex: none;
+  margin-top: 8px;
 }
 
 .empty {

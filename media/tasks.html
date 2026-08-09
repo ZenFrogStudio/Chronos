@@ -17,11 +17,17 @@
       <button id="add-task" class="button" type="button">Add</button>
     </div>
 
-    <div id="task-list" class="task-list"></div>
+    <div id="task-list" class="task-list" role="listbox" aria-label="Tasks"></div>
 
     <p id="empty" class="empty" hidden>
       No tasks yet. Add one above, or schedule a Markdown plan from the manager.
     </p>
+
+    <div id="generate-bar" class="generate-bar" hidden>
+      <button id="generate-plan" class="button is-wide" type="button" disabled>
+        <i class="codicon codicon-lightbulb"></i> Generate plan
+      </button>
+    </div>
 
     <script nonce="{{nonce}}" src="{{scriptUri}}"></script>
   </body>

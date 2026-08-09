@@ -297,6 +297,39 @@ export function removePlan(dir: string, name: string): void {
   fs.unlinkSync(planPath(dir, name));
 }
 
+/**
+ * Moves a file out of the library rather than unlinking it.
+ *
+ * Deleting is reachable from a hover-height button on a list row, and there is
+ * no recycle bin behind `unlinkSync` and no undo behind the row — so the user's
+ * writing survives the misclick, in a folder on disk they can open and re-import
+ * from. Nothing is ever pruned from it: a plan the user wrote is worth more than
+ * the bytes it costs to keep.
+ *
+ * A colliding name costs a suffix, never the archived copy already there.
+ */
+export function archivePlan(dir: string, archiveDir: string, name: string): PlanFile {
+  const from = planPath(dir, name);
+  fs.mkdirSync(archiveDir, { recursive: true });
+
+  const to = uniqueName(
+    listPlans(archiveDir).map((p) => p.name),
+    path.basename(name)
+  );
+  const target = planPath(archiveDir, to);
+
+  try {
+    fs.renameSync(from, target);
+  } catch {
+    // A rename cannot cross a drive (EXDEV), and `chronos.libraryPath` can put
+    // the library on one while the archive stays under the folder's `.chronos`.
+    fs.copyFileSync(from, target);
+    fs.unlinkSync(from);
+  }
+
+  return describe(archiveDir, to);
+}
+
 function starterBody(title: string): string {
   return `# ${title}\n\nDescribe what Claude should do when this plan runs.\n`;
 }
