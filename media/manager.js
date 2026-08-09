@@ -68,6 +68,11 @@
   /** Whether the Model field is showing its free-text box. Curated lists go
    *  stale, and the host validates whatever is typed by shape. */
   let customModel = false;
+  /** Whether the When field's popover is showing. */
+  let pickerOpen = false;
+  /** Day 1 of the month the popover is looking at. Null means "wherever the
+   *  scheduled time is" — browsing away from it is what sets this. */
+  let pickerMonth = /** @type {Date|null} */ (null);
 
   const previous = vscode.getState();
   if (previous && previous.selected) selected = previous.selected;
@@ -83,16 +88,47 @@
   const samePath = (a, b) => String(a).toLowerCase() === String(b).toLowerCase();
   const send = (message) => vscode.postMessage(message);
 
-  function toLocalInput(iso) {
-    const d = new Date(iso);
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  }
-
   const toUtcIso = (localValue) => new Date(localValue).toISOString();
   const localTimeOf = (iso) => {
     const d = new Date(iso);
     return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
   };
+
+  // ---------- the when picker's arithmetic ----------
+
+  /** 24-hour clock to the 12-hour one the dropdowns show. */
+  function to12(hour24) {
+    return { h12: hour24 % 12 === 0 ? 12 : hour24 % 12, ampm: hour24 >= 12 ? 'PM' : 'AM' };
+  }
+
+  /** And back again. Noon and midnight are the two that do not follow the rule. */
+  const from12 = (h12, ampm) =>
+    ampm === 'PM' ? (h12 === 12 ? 12 : h12 + 12) : h12 === 12 ? 0 : h12;
+
+  /** A `datetime-local`-shaped string, so it feeds straight into `toUtcIso`.
+   *  `month` is 0-based, as everywhere else Date is handled here. */
+  const localStr = (year, month, day, hour24, minute) =>
+    `${year}-${pad(month + 1)}-${pad(day)}T${pad(hour24)}:${pad(minute)}`;
+
+  /** Day 1 of the month an instant falls in — what the grid is drawn from. */
+  function monthOf(iso) {
+    const d = new Date(iso);
+    return new Date(d.getFullYear(), d.getMonth(), 1);
+  }
+
+  /**
+   * The month grid's cells, flat: `null` for each leading blank before the 1st
+   * (Sunday-first, matching DAY_LABELS), then the days themselves. Flat rather
+   * than nested weeks because a 7-column CSS grid wraps the rows for us.
+   */
+  function calendarWeeks(viewDate) {
+    const year = viewDate.getFullYear();
+    const month = viewDate.getMonth();
+    const cells = new Array(new Date(year, month, 1).getDay()).fill(null);
+    const last = new Date(year, month + 1, 0).getDate();
+    for (let day = 1; day <= last; day++) cells.push(day);
+    return cells;
+  }
 
   function dayDiff(a, b) {
     const da = new Date(a.getFullYear(), a.getMonth(), a.getDate());
@@ -440,12 +476,26 @@
     </div>`;
   }
 
+  /** The one control that schedules an unscheduled plan and, once scheduled,
+   *  toggles it between live and paused. Amber only while it is actually live. */
+  function scheduleToggle(plan, series) {
+    const live = !!series && series.enabled && !series.spent;
+    const label = !series ? 'Schedule' : series.enabled ? 'Scheduled' : 'Paused';
+    // Keyed off `enabled`, not `live`: a spent one-shot is still enabled, so a
+    // click pauses it — the tooltip has to name the click's actual effect.
+    const title = !series
+      ? 'Schedule this plan'
+      : series.enabled ? 'Scheduled — click to pause' : 'Paused — click to resume';
+    return `<button class="button is-quiet schedule-toggle${live ? ' is-scheduled' : ''}"
+      type="button" data-action="schedule-toggle" title="${esc(title)}">${label}</button>`;
+  }
+
   function unscheduledSection(plan) {
     return `<div class="section">
       <h3 class="section-title">Schedule</h3>
       <p class="plan-meta">This plan is not scheduled.</p>
       <div class="actions">
-        <button class="button" type="button" data-action="schedule">Schedule this plan</button>
+        ${scheduleToggle(plan, null)}
       </div>
     </div>`;
   }
@@ -465,11 +515,7 @@
     return `<div class="section">
       <h3 class="section-title">Schedule</h3>
       <div class="grid">
-        <label class="field">
-          <span class="field-label">When</span>
-          <input class="field-input" type="datetime-local" data-field="when"
-            data-focus-key="when" value="${toLocalInput(s.nextRunAt)}" />
-        </label>
+        ${whenField(s)}
 
         <label class="field">
           <span class="field-label">Repeat</span>
@@ -496,9 +542,102 @@
 
       <div class="actions">
         <button class="button" type="button" data-action="run-now">Run now</button>
-        <button class="button is-quiet" type="button" data-action="toggle-enabled">${s.enabled ? 'Pause' : 'Resume'}</button>
+        ${scheduleToggle(planByName(selected), s)}
         <button class="button is-quiet is-danger" type="button" data-action="unschedule">Unschedule</button>
       </div>
+    </div>`;
+  }
+
+  /**
+   * When this runs. A native `datetime-local` asked you to type into six
+   * segments, and opened a calendar drawn by the browser that no selector here
+   * could reach. This one is a button and, once open, plain DOM: click a day,
+   * pick an hour. `pickerOpen` lives outside the DOM because every patch rebuilds
+   * the pane — the same reason the Model field's custom box does.
+   */
+  function whenField(s) {
+    return `<div class="field">
+      <span class="field-label">When</span>
+      <div class="when-picker">
+        <button class="when-trigger" type="button" data-action="picker-toggle"
+          data-focus-key="when" aria-expanded="${pickerOpen}">
+          <span>${esc(formatWhen(s.nextRunAt))}</span>
+          <i class="codicon codicon-calendar" aria-hidden="true"></i>
+        </button>
+        ${pickerOpen ? pickerPopover(s) : ''}
+      </div>
+    </div>`;
+  }
+
+  function pickerPopover(s) {
+    const at = new Date(s.nextRunAt);
+    const view = pickerMonth || monthOf(s.nextRunAt);
+    const today = new Date();
+
+    // A blank leading cell is a bare span: the grid gives it its column, and it
+    // is not a day you can click.
+    const days = calendarWeeks(view)
+      .map((day) => {
+        if (!day) return '<span></span>';
+        const cell = new Date(view.getFullYear(), view.getMonth(), day);
+        // Past days stay clickable — the native input allowed them, and the host
+        // is the one that decides what a past time means.
+        const classes = [
+          'picker-day',
+          dayDiff(cell, today) < 0 ? 'is-muted' : '',
+          dayDiff(cell, today) === 0 ? 'is-today' : '',
+          dayDiff(cell, at) === 0 ? 'is-selected' : ''
+        ].join(' ');
+        return `<button class="${classes}" type="button" data-action="picker-day"
+          data-date="${view.getFullYear()}-${pad(view.getMonth() + 1)}-${pad(day)}">${day}</button>`;
+      })
+      .join('');
+
+    return `<div class="picker-popover">
+      <div class="picker-head">
+        <button class="picker-nav" type="button" data-action="picker-prev"
+          data-focus-key="picker-prev" title="Previous month" aria-label="Previous month">
+          <i class="codicon codicon-chevron-left"></i>
+        </button>
+        <span>${esc(view.toLocaleDateString([], { month: 'long', year: 'numeric' }))}</span>
+        <button class="picker-nav" type="button" data-action="picker-next"
+          data-focus-key="picker-next" title="Next month" aria-label="Next month">
+          <i class="codicon codicon-chevron-right"></i>
+        </button>
+      </div>
+      <div class="picker-grid">
+        ${DAY_LABELS.map((label, i) => `<span class="picker-weekday" title="${DAY_NAMES[i]}">${label}</span>`).join('')}
+        ${days}
+      </div>
+      ${timeRow(at)}
+    </div>`;
+  }
+
+  /** Hour, minute and meridiem as three dropdowns — nothing to type. */
+  function timeRow(at) {
+    const { h12, ampm } = to12(at.getHours());
+    const minute = at.getMinutes();
+
+    // Five-minute steps, plus whatever minute is already set. A series scheduled
+    // for :07 must not be silently rounded to :05 by opening its own picker.
+    const minutes = [];
+    for (let m = 0; m < 60; m += 5) minutes.push(m);
+    if (!minutes.includes(minute)) minutes.push(minute);
+    minutes.sort((a, b) => a - b);
+
+    const option = (value, label, on) =>
+      `<option value="${value}" ${on ? 'selected' : ''}>${label}</option>`;
+
+    return `<div class="picker-time">
+      <select class="field-input" data-field="pickerHour" data-focus-key="picker-hour" aria-label="Hour">
+        ${Array.from({ length: 12 }, (_, i) => option(i + 1, i + 1, i + 1 === h12)).join('')}
+      </select>
+      <select class="field-input" data-field="pickerMinute" data-focus-key="picker-minute" aria-label="Minute">
+        ${minutes.map((m) => option(m, pad(m), m === minute)).join('')}
+      </select>
+      <select class="field-input" data-field="pickerAmpm" data-focus-key="picker-ampm" aria-label="AM or PM">
+        ${['AM', 'PM'].map((v) => option(v, v, v === ampm)).join('')}
+      </select>
     </div>`;
   }
 
@@ -998,16 +1137,40 @@
       saveNow(); // Claude reads the file, so what is on screen must be on disk
       return send({ type: 'generatePlan', name: plan.name, seriesId: series && series.id });
     }
-    if (action === 'schedule') return send({ type: 'schedulePlan', name: plan.name });
+    // Before the `!series` guard: with nothing scheduled, this is what creates it.
+    // Resuming a spent one-shot has to clear `spent`, or it will never fire.
+    if (action === 'schedule-toggle') {
+      if (!series) return send({ type: 'schedulePlan', name: plan.name });
+      return patch(series.id, series.enabled ? { enabled: false } : { enabled: true, spent: false });
+    }
 
     if (runAction(action, runId, series)) return;
     if (!series) return;
 
     if (action === 'unschedule') return send({ type: 'removeSeries', id: series.id });
     if (action === 'browse-cwd') return send({ type: 'browseCwd', id: series.id });
-    if (action === 'toggle-enabled') {
-      // Resuming a spent one-shot has to clear `spent`, or it will never fire.
-      return patch(series.id, series.enabled ? { enabled: false } : { enabled: true, spent: false });
+
+    if (action === 'picker-toggle') {
+      pickerOpen = !pickerOpen;
+      if (pickerOpen) pickerMonth = monthOf(series.nextRunAt);
+      return render();
+    }
+
+    // Browsing months moves the view only. Nothing is scheduled until a day is
+    // clicked, so paging back through last year must not patch anything.
+    if (action === 'picker-prev' || action === 'picker-next') {
+      const view = pickerMonth || monthOf(series.nextRunAt);
+      const step = action === 'picker-next' ? 1 : -1;
+      pickerMonth = new Date(view.getFullYear(), view.getMonth() + step, 1);
+      return render();
+    }
+
+    // The day changes; the time of day is whatever the series already runs at.
+    if (action === 'picker-day') {
+      const [year, month, day] = /** @type {HTMLElement} */ (el).dataset.date.split('-').map(Number);
+      const at = new Date(series.nextRunAt);
+      const local = localStr(year, month - 1, day, at.getHours(), at.getMinutes());
+      return patch(series.id, whenPatch(series, toUtcIso(local)));
     }
 
     if (action === 'day') {
@@ -1038,9 +1201,15 @@
     const series = seriesForPlan(planByName(selected));
     if (!series) return;
 
-    if (field === 'when') {
-      if (!el.value) return;
-      return patch(series.id, whenPatch(series, toUtcIso(el.value)));
+    // The three time dropdowns are one value between them, so any of them
+    // changing reads all three. The date is whatever the series already runs on.
+    if (field === 'pickerHour' || field === 'pickerMinute' || field === 'pickerAmpm') {
+      const read = (name) =>
+        /** @type {HTMLSelectElement} */ (detailEl.querySelector(`[data-field="${name}"]`)).value;
+      const at = new Date(series.nextRunAt);
+      const hour = from12(Number(read('pickerHour')), read('pickerAmpm'));
+      const local = localStr(at.getFullYear(), at.getMonth(), at.getDate(), hour, Number(read('pickerMinute')));
+      return patch(series.id, whenPatch(series, toUtcIso(local)));
     }
 
     if (field === 'repeat') {
@@ -1091,6 +1260,26 @@
 
   window.addEventListener('beforeunload', saveNow);
 
+  /**
+   * Dismissing the When popover. Registered once here rather than inside
+   * render(), which rebuilds the popover on every patch and would stack a
+   * listener each time. The trigger's own click is handled by the delegate above
+   * before this runs, and its target is inside `.when-picker`, so clicking the
+   * trigger to close does not immediately reopen it.
+   */
+  document.addEventListener('click', (e) => {
+    if (!pickerOpen) return;
+    if (/** @type {HTMLElement} */ (e.target).closest('.when-picker')) return;
+    pickerOpen = false;
+    render();
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape' || !pickerOpen) return;
+    pickerOpen = false;
+    render();
+  });
+
   document.getElementById('new-plan').addEventListener('click', () => send({ type: 'createPlan' }));
 
   document.getElementById('import-plan').addEventListener('click', () => send({ type: 'importPlan' }));
@@ -1115,10 +1304,14 @@
 
   const patch = (id, p) => send({ type: 'updateSeries', id, patch: p });
 
-  /** Moving to another plan drops the Model field's free-text box, which
-   *  belonged to the plan you were looking at. */
+  /** Moving to another plan drops the Model field's free-text box and the When
+   *  popover, both of which belonged to the plan you were looking at. */
   function selectPlan(name) {
-    if (name !== selected) customModel = false;
+    if (name !== selected) {
+      customModel = false;
+      pickerOpen = false;
+      pickerMonth = null;
+    }
     selected = name;
     render();
   }

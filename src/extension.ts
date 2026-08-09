@@ -10,7 +10,7 @@ import { probeAgent, Runner } from './runner';
 import { Scheduler } from './scheduler';
 import { StatusItem } from './status';
 import { Store } from './store';
-import { InboxTask, PlanDropController, TaskListView } from './tasks';
+import { TaskView } from './tasks';
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   initLog(context);
@@ -41,17 +41,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const manager = new Manager(context.extensionUri, store, scheduler, libraryPath, resultsPath);
   const status = new StatusItem(store);
 
-  // A tree rather than a registered provider, because only `createTreeView`
-  // takes a drag-and-drop controller — and this view is the one drop target
-  // that works from both the VS Code explorer and the OS shell.
-  const taskList = new TaskListView(libraryPath, manager);
-  const taskView = vscode.window.createTreeView('chronos.tasks', {
-    treeDataProvider: taskList,
-    dragAndDropController: new PlanDropController(manager)
-  });
-  // A message rather than `viewsWelcome`: welcome content cannot accept a drop,
-  // and the empty body has to stay a drop target.
-  taskView.message = 'Add a task, or drop .md files here to schedule them.';
+  // A webview rather than a tree: a to-do list needs an always-there text field,
+  // in-body buttons and coloured rows, none of which the TreeView API can draw.
+  // The view opens the manager itself, since resolving is the only signal an
+  // activity-bar click produces.
+  const taskView = new TaskView(context.extensionUri, libraryPath, manager);
 
   context.subscriptions.push(
     store,
@@ -59,8 +53,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     scheduler,
     manager,
     status,
-    taskList,
     taskView,
+    vscode.window.registerWebviewViewProvider(TaskView.viewType, taskView),
     vscode.window.registerWebviewPanelSerializer(Manager.viewType, {
       // Restores the tab after a window reload instead of holding it in memory.
       async deserializeWebviewPanel(restored: vscode.WebviewPanel) {
@@ -85,16 +79,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       }
     ),
     vscode.commands.registerCommand('chronos.showLogs', () => log.show()),
-    vscode.commands.registerCommand('chronos.addTask', () => taskList.addTask()),
-    vscode.commands.registerCommand('chronos.generatePlan', (task: InboxTask) =>
-      taskList.generatePlan(task)
-    ),
-    vscode.commands.registerCommand('chronos.editTask', (task: InboxTask) =>
-      taskList.editTask(task)
-    ),
-    vscode.commands.registerCommand('chronos.deleteTask', (task: InboxTask) =>
-      taskList.deleteTask(task)
-    )
+    vscode.commands.registerCommand('chronos.addTask', () => taskView.addTask())
   );
 
   await scheduler.start();

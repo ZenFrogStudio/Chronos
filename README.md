@@ -10,16 +10,17 @@ transcript of every run.
 
 Chronos is a single editor tab: your plan library on the left, detail on the
 right — schedule, working directory, permissions, the plan text itself, and run
-history. Open it from the status bar item, the **Open Manager** button in the
-Tasks view behind the clock icon in the activity bar, or `Chronos: Open Manager`.
+history. Clicking the clock icon in the activity bar opens it, alongside the
+Tasks view. You can also open it from the status bar item, the **Open Manager**
+button in the Tasks view, or `Chronos: Open Manager`.
 
 Add a plan four ways:
 
 - **New plan** creates one in your library.
 - **Right-click any `.md` file** — in the VS Code explorer or on an editor tab —
   and choose **Schedule with Chronos**. Multi-select works.
-- **Drag `.md` files onto the Tasks view** in the activity bar, or onto the
-  manager tab itself, from either the VS Code explorer or Windows Explorer.
+- **Drag `.md` files onto the manager tab**, from either the VS Code explorer
+  (hold **Shift**) or Windows Explorer.
 - **Import** picks files with a file dialog.
 
 Every one of them **copies the file into your library and schedules the copy**.
@@ -32,12 +33,18 @@ though the plan file itself now lives in the library.
 
 ## Tasks — capturing work before it is a plan
 
-The clock icon in the activity bar opens **Tasks**: a one-line inbox for things
+The clock icon in the activity bar opens **Tasks** — and the manager tab behind
+it, without taking focus off the sidebar. Tasks is a one-line inbox for things
 you have not written a plan for yet. It exists because a plan is a considered
 document and a thought is not, and because the sidebar is always there — no tab
 switch between having the idea and writing it down.
 
-Press **＋**, type the task, press Enter. That is the whole capture step.
+Type the task in the field at the top and press Enter, or click **Add**. That is
+the whole capture step. Hover a row for the three things you can do to it:
+generate a plan, edit the text in place, or delete it.
+
+A row's dot says what is happening to it — hollow while it is only captured,
+amber and pulsing while a planning session is open for it.
 
 Press **Generate plan** (the lightbulb on a task row) and Chronos opens a
 terminal running `claude` in plan mode, already working from your task. Claude
@@ -60,8 +67,6 @@ own model setting.
 A task is a `.md` file in a `tasks` folder inside your library, so it is just a
 file like everything else here: it can grow past one line, you can edit it in a
 real editor, and it survives anything that resets Chronos's state.
-
-Dropping `.md` files on this view still schedules them — see above.
 
 ## The plan library
 

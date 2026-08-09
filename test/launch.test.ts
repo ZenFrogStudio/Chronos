@@ -140,6 +140,7 @@ describe('buildArgs — opencode', () => {
 
 const TASK = 'D:\\plans\\tasks\\refactor-the-auth-module.md';
 const LIBRARY = 'D:\\plans';
+const STAGING = 'D:\\plans\\.pending\\ab12cd';
 
 const generatable = (overrides: Partial<Parameters<typeof generateCommand>[0]> = {}) => ({
   exe: 'claude',
@@ -162,18 +163,40 @@ describe('generateCommand', () => {
   it('should_write_the_plan_somewhere_other_than_the_task_file', () => {
     // The task view's whole point: a one-line task must never be the thing that
     // gets overwritten by the plan generated from it.
-    const destPath = 'D:\\plans\\refactor-the-auth-module.md';
-    const command = generateCommand(generatable({ sourcePath: TASK, destPath }));
+    const command = generateCommand(generatable({ sourcePath: TASK, destDir: STAGING }));
 
-    assert.ok(command.includes(`write the approved plan to ${destPath}`));
-    assert.ok(!command.includes(`write the approved plan to ${TASK}`));
+    assert.ok(command.includes(`save the approved plan as a new .md file in ${STAGING}`));
+    assert.ok(!command.includes(`overwrite that same file`));
   });
 
-  it('should_overwrite_the_source_when_no_destination_is_given', () => {
-    // The manager's own button re-plans a library plan in place.
+  it('should_ask_claude_to_name_the_file_after_the_change', () => {
+    // Chronos cannot name the plan before it exists — guessing from the task
+    // text is what filled the library with truncated request lines.
+    const command = generateCommand(generatable({ sourcePath: TASK, destDir: STAGING }));
+
+    assert.ok(command.includes('Name that file with a short summary of the change'));
+  });
+
+  it('should_not_ask_for_a_name_when_overwriting_in_place', () => {
+    // The manager's own button re-plans a library plan in place, and that plan
+    // already has a name the user chose.
     const command = generateCommand(generatable());
 
-    assert.ok(command.includes('overwrite that same file'));
+    assert.ok(command.includes('overwrite that same file with the approved plan'));
+    assert.ok(!command.includes('Name that file'));
+  });
+
+  it('should_keep_the_instruction_free_of_shell_metacharacters', () => {
+    // The instruction is one quoted argument typed into a live shell prompt:
+    // interactive bash expands `!`, PowerShell expands `$`, and both run a
+    // backtick or quote. Nothing here may be any of those.
+    const command = generateCommand(generatable({ sourcePath: TASK, destDir: STAGING }));
+
+    assert.ok(!command.includes('`'), 'a backtick would run a command');
+    assert.ok(!command.includes('$'), 'PowerShell would expand it');
+    assert.ok(!command.includes('!'), 'interactive bash would expand it');
+    // An em dash cannot survive cmd.exe's code page.
+    assert.ok(!/[^\x20-\x7e]/.test(command), 'the command must be plain ASCII');
   });
 
   it('should_always_plan_regardless_of_any_other_permission_mode', () => {
@@ -194,10 +217,11 @@ describe('generateCommand', () => {
   });
 
   it('should_grant_access_to_the_library_that_holds_both_paths', () => {
-    // The working directory is the repo; both the task and its destination live
-    // in the library, outside it. One grant covers both, because `tasks/` is
-    // inside the library — without it Claude can neither read nor write.
-    const command = generateCommand(generatable({ sourcePath: TASK, destPath: PLAN }));
+    // The working directory is the repo; both the task and its staging folder
+    // live in the library, outside it. One grant covers both, because `tasks/`
+    // and `.pending/` are inside the library — without it Claude can neither
+    // read nor write.
+    const command = generateCommand(generatable({ sourcePath: TASK, destDir: STAGING }));
 
     assert.equal(command.match(/--add-dir/g)?.length, 1);
     assert.ok(command.includes(`--add-dir '${LIBRARY}'`));

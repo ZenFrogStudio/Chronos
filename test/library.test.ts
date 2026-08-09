@@ -395,6 +395,28 @@ describe('importFile', () => {
     assert.equal(fs.readFileSync(sourcePath, 'utf8'), 'original');
   });
 
+  it('should_slug_an_awkward_name_the_generator_chose', () => {
+    // A generated plan arrives named by Claude, so the name is not one the user
+    // typed into a field with a guard on it. This is what stops it addressing
+    // the filesystem or arriving with capitals, spaces and quotes in it.
+    // Single quotes rather than double: Windows refuses to create the latter, so
+    // no generator could produce that name in the first place.
+    const plan = importFile(dir, source("Add 'Monthly' Repeat.md", '# Repeat\n'));
+
+    assert.equal(plan.name, 'add-monthly-repeat.md');
+  });
+
+  it('should_not_overwrite_a_plan_that_already_has_that_name', () => {
+    // Claude cannot see the library when it picks a name, so a collision is a
+    // matter of time. It must cost a suffix, not an existing plan.
+    createPlan(dir, 'Refactor auth', 'the original');
+
+    const plan = importFile(dir, source('refactor-auth.md', 'the generated one'));
+
+    assert.equal(plan.name, 'refactor-auth-2.md');
+    assert.equal(readPlan(dir, 'refactor-auth.md'), 'the original');
+  });
+
   it('should_deduplicate_against_a_plan_of_the_same_name', () => {
     createPlan(dir, 'Nightly');
 

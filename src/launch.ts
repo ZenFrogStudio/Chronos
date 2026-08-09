@@ -117,11 +117,13 @@ export interface GenerateOptions {
   /** The file Claude reads the request from — a library plan, or a sidebar task. */
   sourcePath: string;
   /**
-   * Where the approved plan is written. Omitted means overwrite `sourcePath`,
-   * which is what the manager's own button does; the task view passes a separate
-   * destination so a one-line task is never the thing that gets overwritten.
+   * A folder the approved plan is saved into, under a file name Claude chooses.
+   * Omitted means overwrite `sourcePath`, which is what the manager's own button
+   * does; the task view passes a folder so a one-line task is never the thing
+   * that gets overwritten, and so the plan arrives named after the change it
+   * makes rather than after the request that asked for it.
    */
-  destPath?: string;
+  destDir?: string;
   /** Granted with --add-dir. Must contain both paths above, since the working
    *  directory is the repo and neither file usually sits inside it. */
   allowDir: string;
@@ -141,21 +143,27 @@ export interface GenerateOptions {
  * writes a plan, it does not carry one out.
  */
 export function generateCommand(options: GenerateOptions): string {
-  const { exe, sourcePath, destPath, allowDir, model, shell } = options;
+  const { exe, sourcePath, destDir, allowDir, model, shell } = options;
   const q = (value: string) => quote(shell, value);
 
   // No `!`, `$`, backtick or quote of its own: interactive bash expands `!` and
   // PowerShell expands `$`, so the only thing `quote` has to survive is a path.
-  const destination = destPath
-    ? `write the approved plan to ${destPath}`
+  const destination = destDir
+    ? `save the approved plan as a new .md file in ${destDir}`
     : 'overwrite that same file with the approved plan';
+
+  const naming =
+    ' Name that file with a short summary of the change the plan makes, in ' +
+    'lower case with hyphens instead of spaces, ending in .md, for example ' +
+    'add-monthly-repeat-option.md. Do not just repeat the words of the request.';
 
   const instruction =
     `Read the file at ${sourcePath}. Treat what it says as the request, ` +
     'work out how to carry it out, and write an implementation plan for it. ' +
     `Ask me anything you need to first. When I approve the plan, ${destination}, ` +
     'written as instructions for an agent that will carry it out later with ' +
-    'nobody watching, and change nothing else.';
+    'nobody watching, and change nothing else.' +
+    (destDir ? naming : '');
 
   // PowerShell reads a quoted string at the start of a line as a value, not a
   // command; & is what makes it run.

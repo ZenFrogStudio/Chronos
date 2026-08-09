@@ -82,17 +82,21 @@ export class Manager implements vscode.Disposable {
     this.panel?.dispose();
   }
 
-  /** Opens the manager, or reveals the tab that is already open. */
-  open(): void {
+  /**
+   * Opens the manager, or reveals the tab that is already open. `preserveFocus`
+   * is for callers the user did not aim at the manager — the activity-bar icon,
+   * which reveals the Tasks view and this tab from one click.
+   */
+  open(preserveFocus = false): void {
     if (this.panel) {
-      this.panel.reveal(this.panel.viewColumn ?? vscode.ViewColumn.Active);
+      this.panel.reveal(this.panel.viewColumn ?? vscode.ViewColumn.Active, preserveFocus);
       return;
     }
 
     const panel = vscode.window.createWebviewPanel(
       Manager.viewType,
       'Chronos',
-      vscode.ViewColumn.Active,
+      { viewColumn: vscode.ViewColumn.Active, preserveFocus },
       { enableScripts: true, localResourceRoots: [vscode.Uri.joinPath(this.extensionUri, 'media')] }
     );
     this.adopt(panel);
@@ -610,7 +614,8 @@ function askForTitle(prompt: string, value: string): Thenable<string | undefined
 }
 
 /** Cryptographic, not `Math.random`: a nonce is the CSP's only guarantee that a
- *  `<script>` in this document came from us. */
-function createNonce(): string {
+ *  `<script>` in this document came from us. Shared with the task view, which
+ *  renders its own webview the same way. */
+export function createNonce(): string {
   return randomBytes(24).toString('base64');
 }

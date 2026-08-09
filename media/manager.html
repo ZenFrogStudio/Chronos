@@ -26,6 +26,14 @@
           <div class="library-actions">
             <button id="new-plan" class="button" type="button">New plan</button>
             <button id="import-plan" class="button is-quiet" type="button" title="Copy existing .md files into the library">Import</button>
+            <button id="reveal-library" class="icon-action" type="button"
+              title="Show library folder" aria-label="Show library folder">
+              <i class="codicon codicon-library"></i>
+            </button>
+            <button id="reveal-results" class="icon-action" type="button"
+              title="Show results folder" aria-label="Show results folder">
+              <i class="codicon codicon-output"></i>
+            </button>
           </div>
           <input id="search" class="search" type="search" placeholder="Search plans" aria-label="Search plans" />
         </header>
@@ -34,16 +42,6 @@
           <p class="plan-group">Completed</p>
           <div id="completed-list" class="completed-list"></div>
         </div>
-        <footer class="library-foot">
-          <button id="reveal-library" class="foot-action" type="button"
-            title="Show library folder" aria-label="Show library folder">
-            <i class="codicon codicon-library"></i>
-          </button>
-          <button id="reveal-results" class="foot-action" type="button"
-            title="Show results folder" aria-label="Show results folder">
-            <i class="codicon codicon-output"></i>
-          </button>
-        </footer>
       </aside>
 
       <section id="detail" class="detail"></section>

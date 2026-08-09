@@ -244,13 +244,119 @@ logic out; one of the moves also narrowed a guard.
 
 ### Changed
 
-- **The two links at the foot of the plan library are now icon buttons.**
-  *Show library folder* and *Show results folder* were underlined blue text
-  stacked on two lines — the loudest thing in the panel, spent on the two actions
-  you reach for least. They are now a single row of two 24px codicon buttons that
-  sit quiet at `--muted` and light up on hover, like the rename and delete
-  actions on a plan row. The tooltip and the screen-reader label both still say
-  the full wording. Clicking either does exactly what it did before.
+- **One schedule toggle instead of two buttons (0.8.0-rc.23).** The detail pane
+  had a **Schedule this plan** button when a plan had no schedule and a separate
+  **Pause** / **Resume** button once it did. They are now a single control that
+  reads its own state: grey **Schedule** when nothing is scheduled, sodium amber
+  **Scheduled** while the job is live, grey **Paused** when it is scheduled but
+  paused. Clicking it schedules the plan, or toggles between live and paused.
+
+  The colour is the point. Amber is the one thing Chronos spends on liveness, so
+  it appears only while the job will actually fire — a paused series and a spent
+  one-shot both stay quiet, the same rule the countdown ring already follows.
+  **Run now** and **Unschedule** are unchanged, and so is everything outside
+  `media/`.
+
+- **The Schedule section's When field is a real picker now (0.8.0-rc.22).** It
+  was a native `datetime-local` input, which meant setting a time was six typed
+  segments — `MM/DD/YYYY hh:mm AM` — and the calendar it opened was drawn by the
+  browser, outside the page, where the only thing Chronos could change about it
+  was whether it came up dark or light. A white-and-blue Chromium calendar over
+  the manager looked like it belonged to a different program, because it did.
+
+  It is now a button that reads the scheduled time back to you, and opens a
+  popover built from the same palette as everything else: a month grid you click
+  a day in, arrows to page through months, and three dropdowns for hour, minute
+  and AM/PM. Nothing is typed. The selected day is filled in sodium, the same
+  colour the countdown ring and the run dots use for the scheduled instant, and
+  today is outlined.
+
+  Two details worth naming. Past days are still clickable — the native input
+  allowed them and the host is what decides whether a past time means anything,
+  so nothing new was invented here. And the minute dropdown steps in fives but
+  always includes whatever minute is already set: a series running at `:07` does
+  not get quietly rounded to `:05` just because you opened its picker to change
+  the hour.
+
+  The value itself is unchanged. It still leaves through the same path it always
+  did, so recurring series keep moving their rule with their time, and nothing on
+  the host side knows the control was replaced.
+
+- **A generated plan is now named after the change it makes (0.8.0-rc.21).**
+  Chronos used to name the file before the plan existed, by slugging the first
+  line of the task — so the library filled with truncated request text on files
+  whose contents said something else entirely. A plan about controlling the
+  desktop from a phone was filed as
+  `when-clicking-generate-plan-in-the-task-sidecar-i-would-like.md`. Claude now
+  names the file itself, as part of approving the plan: it knows what the plan
+  does, and Chronos does not.
+
+  That name has to land somewhere safe, because a self-chosen one could collide
+  with a plan you already have. So each planning session writes into its own
+  staging folder, `.pending/<session>/` inside the library, and Chronos adopts
+  the file from there through the same door every imported plan comes through —
+  which slugs the name and appends `-2` rather than overwriting anything. The
+  folder is also what still matches a finished plan back to the task that asked
+  for it, so the task clears exactly as before, even with two sessions open at
+  once. Backing out of a session still creates nothing; its folder is cleared on
+  the next window reload.
+
+  Plans already in your library keep the names they have — nothing is renamed
+  retrospectively. Import, drag-and-drop and **Schedule with Chronos** are
+  unchanged, and so is the manager's own **Generate plan** button, which rewrites
+  a plan in place under the name you gave it.
+
+- **The Tasks view is a real to-do list now (0.8.0-rc.20).** It was a native tree:
+  one grey circle per row, and adding a task meant clicking **＋** in the title
+  bar and answering a pop-up input box. It is now an HTML view, styled like the
+  manager, with a **What needs doing?** field and an **Add** button always
+  visible at the top — type, press Enter, and the row is there. Editing happens
+  in place on the row rather than in a pop-up: the pencil turns the text into a
+  field, Enter saves, Esc cancels. Deleting still asks first, because the file is
+  unlinked rather than recycled.
+
+  Each row carries a status dot, the same one the Runs panel uses. A captured
+  task is a hollow neutral ring; a task with a planning session open glows amber
+  with a halo, so the list says which of them Claude is working on. Nothing new
+  is stored for this — the dot reads the same in-memory map that already clears a
+  task when its plan lands, so a window reload leaves the dot neutral while the
+  plan still arrives.
+
+  A tree cannot host an input field, in-body buttons or freely coloured rows —
+  that is an API limit, not a styling one — so the view had to change technology
+  to change shape. The cost is below, under Removed.
+
+- **The clock icon in the activity bar now opens the manager too.** Clicking it
+  used to show only the Tasks inbox, so the most visible thing Chronos puts in
+  the editor did not lead to Chronos' actual UI — you needed a second click on
+  **Open Manager**, the status bar item, or the command palette to get there.
+  Now one click reveals the Tasks sidebar exactly as before *and* opens the
+  manager tab behind it.
+
+  The sidebar deliberately stays open. It is the capture inbox, so collapsing it
+  to make the icon a pure launcher would cost more than it gained.
+  The manager opens without taking focus, which means your keystrokes stay in the
+  sidebar where you clicked. **Open Manager**, the status bar item and
+  `Chronos: Open Manager` all still work and still open the manager *with* focus
+  — they are how you get the tab back after closing it.
+
+  One consequence worth knowing: if VS Code reopens a window with the Chronos
+  container showing, the manager opens with it.
+
+- **The two folder links in the plan library are now icon buttons, up in the
+  header.** *Show library folder* and *Show results folder* were underlined blue
+  text stacked on two lines in a footer — the loudest thing in the panel, spent
+  on the two actions you reach for least. They are now two 24px codicon buttons
+  sitting beside **Import**, quiet at `--muted` and lighting on hover, like the
+  rename and delete actions on a plan row. The tooltip and the screen-reader
+  label both still say the full wording, and clicking either does exactly what
+  it did before.
+
+  Moving them retires the footer entirely, so the plan list and the **Completed**
+  section now run to the bottom of the pane. The class is `.icon-action` rather
+  than `.foot-action`, since it no longer describes where the button lives. The
+  header row wraps rather than shrinks: at a large editor font four controls do
+  not fit 260px, and a squashed *New plan* reads worse than a second row.
 
   This adds the official VS Code **codicon** font to the project, vendored as
   `media/codicon.css` and `media/codicon.ttf`. The webview may only load from
@@ -456,6 +562,24 @@ logic out; one of the moves also narrowed a guard.
   gates in the source; those are different things.
 
 ### Removed
+
+- **The sidebar is no longer a drop target (0.8.0-rc.20).** Dragging a `.md` file
+  onto the Tasks view used to schedule it, and a webview cannot accept that drop
+  the way a tree could — VS Code blocks mouse events over a webview mid-drag, and
+  Electron 32 removed `File.path`, so a sandboxed view can no longer learn where
+  a dropped file came from. `PlanDropController` is gone with it.
+
+  The three other routes are unchanged and one of them is a drop: drag onto the
+  **manager** pane (hold **Shift** when dragging from the VS Code explorer),
+  right-click a `.md` file → **Schedule with Chronos**, or use **Schedule
+  Markdown File…** in the Tasks view's **⋯** menu. All four still end the same
+  way — a copy in the library, scheduled, your original untouched.
+
+  The **＋** button in the Tasks title bar went too, since adding is now a field
+  in the panel itself. `Chronos: Add Task` remains in the command palette. The
+  `chronos.generatePlan`, `chronos.editTask` and `chronos.deleteTask` commands
+  are gone: they existed only to put icons on a tree row, were hidden from the
+  palette, and the row buttons now speak to the view directly.
 
 - **The External group and its badge**, along with everything that existed to
   support the second kind of plan: the second `fs.watch` on an external plan's

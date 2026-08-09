@@ -1,0 +1,228 @@
+/* Chronos task inbox — the activity-bar view. Derived from VS Code theme vars so
+   it adapts to any theme, and deliberately its own small sheet rather than the
+   manager's: this panel is a list, an input and a button. Chronos owns one
+   colour — sodium — spent only on liveness, which here means a plan being
+   written right now. Global values only — no component tokens. */
+
+:root {
+  --border: var(--vscode-widget-border, color-mix(in srgb, var(--vscode-foreground) 18%, transparent));
+  --accent: var(--vscode-focusBorder);
+  --sodium: #E0A458;
+  --muted: var(--vscode-descriptionForeground);
+  --danger: var(--vscode-errorForeground);
+  --raised: color-mix(in srgb, var(--vscode-foreground) 4%, transparent);
+  --radius: 6px;
+}
+
+/* Amber needs darkening to stay legible on a light background. */
+body.vscode-light {
+  --sodium: #9A5B0F;
+}
+
+/* Never paint a brand colour over an accessibility theme. Covers light HC too,
+   which carries both vscode-high-contrast and vscode-high-contrast-light. */
+body.vscode-high-contrast {
+  --sodium: var(--vscode-focusBorder);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  padding: 8px;
+  color: var(--vscode-foreground);
+  background: var(--vscode-sideBar-background);
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size);
+  /* Decides whether Chromium paints the native scrollbar dark or light — no
+     selector reaches that chrome. Declared here so every control inherits it. */
+  color-scheme: dark;
+}
+
+/* Both light themes. HC light carries vscode-high-contrast-light; plain light
+   carries vscode-light. Neither implies the other, so both are named. */
+body.vscode-light,
+body.vscode-high-contrast-light {
+  color-scheme: light;
+}
+
+/* --- Capture --- */
+
+.add {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.task-field {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  font: inherit;
+}
+
+.task-field:focus,
+.task-edit:focus {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.button {
+  padding: 4px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+  font: inherit;
+  cursor: pointer;
+  transition: background 200ms ease-in-out;
+}
+
+.button:hover {
+  background: var(--vscode-button-hoverBackground);
+}
+
+.button:focus-visible,
+.task-action:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* --- The list --- */
+
+.task-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* The row actions are laid over the row rather than beside it, so adding them
+   does not change where the task text truncates. */
+.task-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  /* The right padding is the action buttons' lane: long text must ellipsise
+     before it reaches them rather than run underneath. */
+  padding: 5px 62px 5px 8px;
+  border-radius: var(--radius);
+}
+
+.task-row:hover {
+  background: var(--vscode-list-hoverBackground);
+}
+
+.task-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-edit {
+  flex: 1;
+  min-width: 0;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  font: inherit;
+}
+
+/* Same dot as a run: hollow and neutral for something merely captured, filled
+   amber with a halo while a planning session is open for it. */
+.task-dot {
+  flex: none;
+  position: relative;
+  width: 9px;
+  height: 9px;
+  border: 1.5px solid var(--muted);
+  border-radius: 50%;
+  background: var(--vscode-sideBar-background);
+}
+
+.task-dot.is-generating {
+  border-color: var(--sodium);
+  background: var(--sodium);
+}
+
+.task-dot.is-generating::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border: 1px solid var(--sodium);
+  border-radius: 50%;
+  animation: halo 1.6s ease-in-out infinite;
+}
+
+@keyframes halo {
+  0%, 100% { opacity: 0.7; transform: scale(1); }
+  50% { opacity: 0; transform: scale(1.4); }
+}
+
+/* --- Row actions --- */
+
+.task-actions {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  transform: translateY(-50%);
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 200ms ease-in-out;
+}
+
+/* Hidden until wanted, but never hidden from the keyboard. */
+.task-row:hover .task-actions,
+.task-actions:focus-within {
+  opacity: 1;
+}
+
+.task-action {
+  width: 17px;
+  height: 17px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.95em;
+  line-height: 1;
+  cursor: pointer;
+  transition: color 200ms ease-in-out, background 200ms ease-in-out;
+}
+
+.task-action:hover {
+  background: var(--raised);
+  color: var(--vscode-foreground);
+}
+
+.task-action.is-danger:hover {
+  background: color-mix(in srgb, var(--danger) 22%, transparent);
+  color: var(--danger);
+}
+
+.empty {
+  margin: 8px 4px;
+  color: var(--muted);
+  font-size: 0.9em;
+  line-height: 1.5;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .task-dot.is-generating::after { animation: none; }
+}

@@ -1,10 +1,11 @@
+import { randomBytes } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { generateCommand, shellKind } from './launch';
 import * as library from './library';
 import { log } from './log';
-import { Manager, toFsPath } from './manager';
+import { createNonce, Manager } from './manager';
 import { CLAUDE_MODELS } from './agents';
 import { defaultCwd } from './series';
 
@@ -23,10 +24,20 @@ import { defaultCwd } from './series';
  * subdirectories so `tasks/` never shows up as a plan, and a task survives a
  * state reset because it is just a file.
  *
+ * It is a webview rather than a tree because a to-do list needs an always-there
+ * text field, in-body buttons and coloured rows, none of which the TreeView API
+ * can draw. The cost is that this view is no longer a native drop target — a
+ * tree got real `Uri`s from the explorer and the OS shell, a webview cannot —
+ * so drops go to the manager pane, and **Schedule with Chronos** and the file
+ * picker are unchanged.
+ *
  * Generating a plan from a task is an *authoring* session, deliberately outside
  * the scheduler: a real terminal you can talk to, with no concurrency slot, no
- * run record and no transcript. The plan landing in the library is what marks it
- * finished.
+ * run record and no transcript. The plan is written to a per-session staging
+ * folder under a name Claude chooses — it knows what the plan does, where a name
+ * guessed from the task text only ever repeats the request — and is adopted into
+ * the library from there. The plan landing in the library is still what marks
+ * the task finished.
  */
 
 /** A row in the inbox. `name` is the file name, which is its identity. */
@@ -36,60 +47,115 @@ export interface InboxTask {
   label: string;
 }
 
+/** Messages the webview may send. Anything else is logged and ignored. */
+type Inbound =
+  | { type: 'ready' }
+  | { type: 'addTask'; text: string }
+  | { type: 'editTask'; name: string; text: string }
+  | { type: 'deleteTask'; name: string }
+  | { type: 'generatePlan'; name: string };
+
 /** Where tasks live, relative to the plan library that contains them. */
 export function tasksDirIn(libraryDir: string): string {
   return path.join(libraryDir, 'tasks');
 }
 
-export class TaskListView implements vscode.TreeDataProvider<InboxTask>, vscode.Disposable {
-  private readonly changed = new vscode.EventEmitter<void>();
-  readonly onDidChangeTreeData = this.changed.event;
+/**
+ * Where a plan-generation session writes its result. One folder per session:
+ * the file name is Claude's to choose now, so the folder is what matches a
+ * landed plan back to the task that asked for it. Dot-prefixed and never
+ * listed — `listPlans` only ever sees `.md` files, so this cannot show up as a
+ * plan.
+ */
+export function pendingDirIn(libraryDir: string): string {
+  return path.join(libraryDir, '.pending');
+}
 
-  private readonly libraryWatcher: vscode.FileSystemWatcher;
+/** A planning session in flight: its staging folder and the task that asked. */
+interface PendingPlan {
+  taskName: string;
+  dir: string;
+  watcher: vscode.FileSystemWatcher;
+}
+
+export class TaskView implements vscode.WebviewViewProvider, vscode.Disposable {
+  static readonly viewType = 'chronos.tasks';
+
+  private view: vscode.WebviewView | undefined;
   /**
-   * Destination file name → the task that asked for it, for sessions still open.
-   * Held in memory only: if the window reloads mid-session the plan still lands,
-   * the task simply is not auto-deleted. Nothing is destroyed either way, and a
-   * persisted map would be a second source of truth about work we cannot see.
+   * Session id → the session. Held in memory only: if the window reloads
+   * mid-session the plan simply stays in its staging folder and the task is not
+   * cleared. Nothing is destroyed either way, and a persisted map would be a
+   * second source of truth about work we cannot see.
    */
-  private readonly awaitingPlan = new Map<string, string>();
+  private readonly awaitingPlan = new Map<string, PendingPlan>();
 
   constructor(
+    private readonly extensionUri: vscode.Uri,
     private readonly libraryPath: () => string,
     private readonly manager: Manager
-  ) {
-    // Non-recursive by design: `*.md` matches the library root only, so writes
-    // inside `tasks/` never look like a finished plan.
-    this.libraryWatcher = vscode.workspace.createFileSystemWatcher(
-      new vscode.RelativePattern(this.libraryPath(), '*.md'),
-      false,
-      true,
-      true
-    );
-    this.libraryWatcher.onDidCreate((uri) => this.onPlanLanded(uri));
-  }
+  ) {}
 
   dispose(): void {
-    this.libraryWatcher.dispose();
-    this.changed.dispose();
+    for (const pending of this.awaitingPlan.values()) {
+      pending.watcher.dispose();
+      fs.rmSync(pending.dir, { recursive: true, force: true });
+    }
+    this.awaitingPlan.clear();
   }
 
-  refresh(): void {
-    this.changed.fire();
+  ///////////////////////////*The view*////////////////////////////
+
+  resolveWebviewView(view: vscode.WebviewView): void {
+    this.view = view;
+    view.webview.options = {
+      enableScripts: true,
+      localResourceRoots: [vscode.Uri.joinPath(this.extensionUri, 'media')]
+    };
+    view.webview.html = this.render(view.webview);
+
+    view.webview.onDidReceiveMessage((message: Inbound) => {
+      this.handle(message).catch((err) => {
+        log.error('task view message failed', err);
+        void vscode.window.showWarningMessage(String(err instanceof Error ? err.message : err));
+      });
+    });
+
+    view.onDidDispose(() => {
+      this.view = undefined;
+    });
+
+    // The closest thing VS Code offers to "the activity-bar icon was clicked":
+    // this view resolving or becoming visible is the only signal that click
+    // produces. Focus stays in the sidebar — the click aimed there, and the
+    // manager is the bonus.
+    this.manager.open(true);
+    view.onDidChangeVisibility(() => {
+      if (view.visible) {
+        this.manager.open(true);
+      }
+    });
   }
 
-  getTreeItem(task: InboxTask): vscode.TreeItem {
-    const node = new vscode.TreeItem(task.label);
-    node.iconPath = new vscode.ThemeIcon('circle-outline');
-    node.tooltip = task.label;
-    // Bound by `viewItem == task` in package.json, which is what puts the
-    // inline lightbulb/pencil/trash on the row.
-    node.contextValue = 'task';
-    node.command = { command: 'chronos.editTask', title: 'Edit Task', arguments: [task] };
-    return node;
+  /** Sends the whole list. Cheap, and the only shape the webview understands —
+   *  the list is a few rows and rebuilding it is free. */
+  private post(): void {
+    if (!this.view) {
+      return;
+    }
+    const pending = new Set([...this.awaitingPlan.values()].map((p) => p.taskName));
+
+    this.view.webview.postMessage({
+      type: 'state',
+      tasks: this.list().map((task) => ({
+        name: task.name,
+        label: task.label,
+        generating: pending.has(task.name)
+      }))
+    });
   }
 
-  getChildren(): InboxTask[] {
+  private list(): InboxTask[] {
     const dir = tasksDirIn(this.libraryPath());
     return library.listPlans(dir).map((file) => ({
       name: file.name,
@@ -98,44 +164,105 @@ export class TaskListView implements vscode.TreeDataProvider<InboxTask>, vscode.
     }));
   }
 
+  private render(webview: vscode.Webview): string {
+    const mediaUri = (name: string) =>
+      webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'media', name)).toString();
+
+    const htmlPath = vscode.Uri.joinPath(this.extensionUri, 'media', 'tasks.html').fsPath;
+
+    return fs
+      .readFileSync(htmlPath, 'utf8')
+      .replaceAll('{{nonce}}', createNonce())
+      .replaceAll('{{cspSource}}', webview.cspSource)
+      .replaceAll('{{styleUri}}', mediaUri('tasks.css'))
+      .replaceAll('{{codiconUri}}', mediaUri('codicon.css'))
+      .replaceAll('{{scriptUri}}', mediaUri('tasks.js'));
+  }
+
+  ///////////////////////////*Messages*////////////////////////////
+
+  private async handle(message: Inbound): Promise<void> {
+    const dir = tasksDirIn(this.libraryPath());
+
+    switch (message.type) {
+      case 'ready':
+        this.post();
+        return;
+
+      case 'addTask': {
+        // The untrusted side of the boundary, so the text is checked here rather
+        // than trusting the field's own guard. The file name is derived from it
+        // by `toPlanFileName`, which sanitises.
+        const text = cleanText(message.text);
+        if (!text) {
+          return;
+        }
+        const task = library.createPlan(dir, text, `${text}\n`);
+        log.info(`captured task ${task.name}`);
+        this.post();
+        return;
+      }
+
+      case 'editTask': {
+        const text = cleanText(message.text);
+        if (!text) {
+          return;
+        }
+        // The file name is not shown anywhere, so it is left as first written
+        // rather than renamed to chase the text — a rename would only risk
+        // losing the file.
+        library.writePlan(dir, message.name, `${text}\n`);
+        this.post();
+        return;
+      }
+
+      // Always asks: `removePlan` unlinks rather than recycling, and this sits on
+      // a hover-height button where a misclick costs the file.
+      case 'deleteTask': {
+        const task = this.list().find((t) => t.name === message.name);
+        if (!task) {
+          this.post();
+          return;
+        }
+        const choice = await vscode.window.showWarningMessage(
+          `Delete "${task.label}"?`,
+          { modal: true, detail: 'The file is deleted, not moved to the recycle bin.' },
+          'Delete'
+        );
+        if (!choice) {
+          return;
+        }
+        library.removePlan(dir, task.name);
+        this.post();
+        return;
+      }
+
+      case 'generatePlan': {
+        const task = this.list().find((t) => t.name === message.name);
+        if (task) {
+          await this.generatePlan(task);
+        }
+        // After, not before: this is what lights the row's dot amber.
+        this.post();
+        return;
+      }
+
+      default:
+        log.warn(`ignored an unknown task view message: ${JSON.stringify(message)}`);
+    }
+  }
+
   ///////////////////////////*Task editing*////////////////////////////
 
+  /** The command-palette route in. The view's own field is the usual one. */
   async addTask(): Promise<void> {
     const text = await askForTask('What needs doing?', '');
     if (!text) {
       return;
     }
-    const dir = tasksDirIn(this.libraryPath());
-    const task = library.createPlan(dir, text, `${text}\n`);
+    const task = library.createPlan(tasksDirIn(this.libraryPath()), text, `${text}\n`);
     log.info(`captured task ${task.name}`);
-    this.refresh();
-  }
-
-  async editTask(task: InboxTask): Promise<void> {
-    const current = readOrEmpty(task.filePath);
-    const text = await askForTask('Edit this task', library.taskLabel(current));
-    if (!text) {
-      return;
-    }
-    // The file name is not shown anywhere, so it is left as first written rather
-    // than renamed to chase the text — a rename would only risk losing the file.
-    library.writePlan(tasksDirIn(this.libraryPath()), task.name, `${text}\n`);
-    this.refresh();
-  }
-
-  /** Always asks: `removePlan` unlinks rather than recycling, and this sits on a
-   *  hover-height X where a misclick costs the file. */
-  async deleteTask(task: InboxTask): Promise<void> {
-    const choice = await vscode.window.showWarningMessage(
-      `Delete "${task.label}"?`,
-      { modal: true, detail: 'The file is deleted, not moved to the recycle bin.' },
-      'Delete'
-    );
-    if (!choice) {
-      return;
-    }
-    library.removePlan(tasksDirIn(this.libraryPath()), task.name);
-    this.refresh();
+    this.post();
   }
 
   ///////////////////////////*Plan generation*////////////////////////////
@@ -145,10 +272,9 @@ export class TaskListView implements vscode.TreeDataProvider<InboxTask>, vscode.
    * the library. Backing out at any point — Esc, closing the terminal, never
    * approving — leaves the task exactly where it was and creates nothing.
    */
-  async generatePlan(task: InboxTask): Promise<void> {
+  private async generatePlan(task: InboxTask): Promise<void> {
     if (!fs.existsSync(task.filePath)) {
       void vscode.window.showWarningMessage('That task no longer exists.');
-      this.refresh();
       return;
     }
 
@@ -165,66 +291,105 @@ export class TaskListView implements vscode.TreeDataProvider<InboxTask>, vscode.
     }
 
     const libraryDir = this.libraryPath();
-    // Reserved, not created: nothing is written unless you approve a plan, and a
-    // zero-byte file left behind by a cancelled session would be worse than none.
-    const destName = library.uniqueName(
-      library.listPlans(libraryDir).map((p) => p.name),
-      library.toPlanFileName(task.label)
-    );
-    const destPath = path.join(libraryDir, destName);
+    // Created rather than reserved: Claude needs somewhere to write, and an
+    // empty folder left behind by a cancelled session costs nothing and is
+    // cleaned up on dispose. The plan is named by Claude inside this folder,
+    // then adopted into the library under a sanitised name.
+    const sessionId = randomBytes(6).toString('hex');
+    const sessionDir = path.join(pendingDirIn(libraryDir), sessionId);
+    fs.mkdirSync(sessionDir, { recursive: true });
 
     const command = generateCommand({
       exe: config.get<string>('claudePath', 'claude'),
       sourcePath: task.filePath,
-      destPath,
-      // One grant covers both files, since `tasks/` is inside the library.
+      destDir: sessionDir,
+      // One grant covers task, staging folder and library, since all three are
+      // inside the library.
       allowDir: libraryDir,
       model: model || undefined,
       shell: shellKind(vscode.env.shell, process.platform)
     });
 
-    this.awaitingPlan.set(destName.toLowerCase(), task.name);
+    // Scoped to this session's folder, so a landed file needs no guessing about
+    // which session produced it. Non-recursive; disposed the moment it fires.
+    const watcher = vscode.workspace.createFileSystemWatcher(
+      new vscode.RelativePattern(sessionDir, '*.md'),
+      false,
+      true,
+      true
+    );
+    watcher.onDidCreate((uri) => {
+      this.onPlanLanded(sessionId, uri).catch((err) =>
+        log.error('adopting a generated plan failed', err)
+      );
+    });
+    this.awaitingPlan.set(sessionId, { taskName: task.name, dir: sessionDir, watcher });
 
     const terminal = vscode.window.createTerminal({
-      name: `Chronos: plan ${library.titleOf(destName)}`,
+      name: `Chronos: plan ${task.label.slice(0, 40)}`,
       cwd,
       iconPath: new vscode.ThemeIcon('lightbulb')
     });
     // Focus, unlike a scheduled run: you pressed a button and are about to type.
     terminal.show();
     terminal.sendText(command);
-    log.info(`opened a planning session for task ${task.name} → ${destName} in ${cwd}`);
+    log.info(`opened a planning session for task ${task.name} in ${cwd}`);
   }
 
   /**
-   * The destination file appearing is the completion signal — there is no other
-   * one. The CLI exits when *you* close it, long after the plan is written, and
-   * its exit code says nothing about whether you approved anything.
+   * A file appearing in the session's staging folder is the completion signal —
+   * there is no other one. The CLI exits when *you* close it, long after the
+   * plan is written, and its exit code says nothing about whether you approved
+   * anything. The plan is then adopted into the library from there.
    */
-  private onPlanLanded(uri: vscode.Uri): void {
-    const key = path.basename(uri.fsPath).toLowerCase();
-    const taskName = this.awaitingPlan.get(key);
-    if (!taskName) {
+  private async onPlanLanded(sessionId: string, uri: vscode.Uri): Promise<void> {
+    const pending = this.awaitingPlan.get(sessionId);
+    if (!pending) {
       return;
     }
-    this.awaitingPlan.delete(key);
+    this.awaitingPlan.delete(sessionId);
+    pending.watcher.dispose();
+
+    await settled(uri.fsPath);
+
+    const libraryDir = this.libraryPath();
+    let plan: library.PlanFile;
+    try {
+      // The same door every outside file comes through: it slugs the name Claude
+      // chose and de-duplicates it, so a colliding choice cannot overwrite a plan.
+      plan = library.importFile(libraryDir, uri.fsPath);
+    } catch (err) {
+      // The plan exists in the staging folder, so leave both it and the task
+      // alone rather than clearing a task whose plan never reached the library.
+      log.error(`could not adopt the plan from ${pending.dir}`, err);
+      void vscode.window.showWarningMessage(
+        `Chronos could not move the generated plan into your library. It is still in ${pending.dir}.`
+      );
+      return;
+    }
+    fs.rmSync(pending.dir, { recursive: true, force: true });
 
     try {
-      library.removePlan(tasksDirIn(this.libraryPath()), taskName);
-      log.info(`plan ${key} landed; cleared task ${taskName}`);
+      library.removePlan(tasksDirIn(libraryDir), pending.taskName);
+      log.info(`plan ${plan.name} landed; cleared task ${pending.taskName}`);
     } catch (err) {
       // The plan is written and that is the part that mattered; a task the user
       // already deleted by hand must not turn this into an error notice.
-      log.warn(`could not clear task ${taskName}: ${String(err)}`);
+      log.warn(`could not clear task ${pending.taskName}: ${String(err)}`);
     }
 
-    this.refresh();
+    this.post();
     this.manager.open();
-    this.manager.reveal(path.basename(uri.fsPath));
+    this.manager.reveal(plan.name);
   }
 }
 
 ///////////////////////////*Prompts*////////////////////////////
+
+/** A task is one line. Anything blank is a stray Enter, not an instruction. */
+function cleanText(text: unknown): string {
+  return typeof text === 'string' ? text.trim() : '';
+}
 
 function askForTask(prompt: string, value: string): Thenable<string | undefined> {
   return vscode.window.showInputBox({
@@ -288,60 +453,25 @@ function readOrEmpty(filePath: string): string {
   }
 }
 
-///////////////////////////*Drop target*////////////////////////////
-
 /**
- * Schedules `.md` files dropped onto this view, in place.
- *
- * This must live extension-side. VS Code disables mouse interaction over a
- * webview mid-drag (microsoft/vscode#182449), so a drag from the explorer never
- * reaches the manager unless you hold Shift, and a sandboxed webview can no
- * longer learn a dropped file's path either — Electron 32 removed `File.path`.
- * A tree's drop handler receives real `Uri`s from both the explorer and the OS
- * shell, which is why this view contributes no `viewsWelcome`: welcome content
- * cannot accept a drop, and the empty body has to stay a drop target.
+ * Waits for a just-created file to stop growing. The create event can arrive
+ * before the CLI has finished writing, and copying a half-written plan into the
+ * library would be worse than waiting two seconds. Gives up rather than hanging:
+ * whatever is on disk by then is what gets adopted.
  */
-export class PlanDropController implements vscode.TreeDragAndDropController<InboxTask> {
-  // 'files' covers the OS shell, 'text/uri-list' the VS Code explorer.
-  readonly dropMimeTypes = ['text/uri-list', 'files'];
-  readonly dragMimeTypes: string[] = [];
-
-  constructor(private readonly manager: Manager) {}
-
-  async handleDrop(
-    _target: InboxTask | undefined,
-    data: vscode.DataTransfer,
-    token: vscode.CancellationToken
-  ): Promise<void> {
-    const paths = await this.readPaths(data);
-    if (token.isCancellationRequested || !paths.length) {
+async function settled(filePath: string): Promise<void> {
+  let previous = -1;
+  for (let attempt = 0; attempt < 8; attempt++) {
+    let size: number;
+    try {
+      size = fs.statSync(filePath).size;
+    } catch {
       return;
     }
-    // Open first, so the manager's inline notice about rejected files lands
-    // somewhere the user can see it.
-    this.manager.open();
-    await this.manager.addPaths(paths);
-  }
-
-  private async readPaths(data: vscode.DataTransfer): Promise<string[]> {
-    const list = await data.get('text/uri-list')?.asString();
-    if (list) {
-      return library.parseUriList(list).map(toFsPath);
+    if (size > 0 && size === previous) {
+      return;
     }
-
-    // OS shell drops arrive as transfer items instead; `DataTransferFile.uri`
-    // is populated on desktop, which is the only place Chronos runs a shell.
-    const paths: string[] = [];
-    data.forEach((item) => {
-      const uri = item.asFile()?.uri;
-      if (uri) {
-        paths.push(uri.fsPath);
-      }
-    });
-
-    if (!paths.length) {
-      log.warn('a drop on the task view carried no file paths');
-    }
-    return paths;
+    previous = size;
+    await new Promise((resolve) => setTimeout(resolve, 250));
   }
 }

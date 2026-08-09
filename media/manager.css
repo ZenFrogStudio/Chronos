@@ -39,11 +39,11 @@ body {
   background: var(--vscode-editor-background);
   font-family: var(--vscode-font-family);
   font-size: var(--vscode-font-size);
-  /* The date picker and the repeat dropdown are browser chrome: they are drawn
-     outside the page and no selector reaches inside them. This is the one lever
-     that does — it decides whether Chromium paints those popups, and the native
-     scrollbars, dark or light. Without it a white calendar opens over a dark
-     editor. Declared here so every control inherits it. */
+  /* The Repeat, Permissions, Engine and Model dropdowns are browser chrome: they
+     are drawn outside the page and no selector reaches inside them. This is the
+     one lever that does — it decides whether Chromium paints those popups, and
+     the native scrollbars, dark or light. Without it a white list opens over a
+     dark editor. Declared here so every control inherits it. */
   color-scheme: dark;
 }
 
@@ -61,7 +61,10 @@ body.vscode-high-contrast-light {
 .library-title,
 .section-title,
 .field-label,
-.field-input[type="datetime-local"],
+.when-trigger,
+.picker-head,
+.picker-day,
+.picker-time .field-input,
 .plan-meta,
 .detail-path,
 .path-value,
@@ -154,8 +157,13 @@ body.dragging .drop-overlay {
   color: var(--muted);
 }
 
+/* Centred, because the row mixes text buttons with taller icon ones. Wrapping
+   rather than shrinking: at a large editor font four controls do not fit 260px,
+   and a squashed "New plan" reads worse than a second row. */
 .library-actions {
   display: flex;
+  align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
   margin-bottom: 8px;
 }
@@ -328,16 +336,9 @@ body.dragging .drop-overlay {
   overflow-y: auto;
 }
 
-/* Two rarely-used utility actions, reduced to codicons on one row: they belong
-   at hand but not in the eye. */
-.library-foot {
-  display: flex;
-  gap: 4px;
-  padding: 6px 10px;
-  border-top: 1px solid var(--border);
-}
-
-.foot-action {
+/* Two rarely-used utility actions, reduced to codicons: they sit beside the
+   buttons that create plans, but stay muted so they do not compete with them. */
+.icon-action {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -352,12 +353,12 @@ body.dragging .drop-overlay {
   transition: color 200ms ease-in-out, background 200ms ease-in-out;
 }
 
-.foot-action:hover {
+.icon-action:hover {
   background: var(--raised);
   color: var(--vscode-foreground);
 }
 
-.foot-action:focus-visible {
+.icon-action:focus-visible {
   outline: 1px solid var(--accent);
   outline-offset: 1px;
 }
@@ -518,43 +519,158 @@ select.field-input {
   font: inherit;
 }
 
-/* --- The when field ---
-   The popup itself is out of reach (see color-scheme on body), but the control
-   that opens it is not, and it is what you look at the other 99% of the time. */
+/* --- The when picker ---
+   A native datetime-local opened a calendar drawn by the browser, outside the
+   page, where only color-scheme reached it. This one is our own DOM, so it takes
+   the same palette, radius and 200ms hovers as everything else here.
+   No font-family below: the two-typeface list above supplies it, and a `font:`
+   shorthand here would override it. */
 
-/* Nothing between the segments should read as punctuation you could edit. */
-.field-input::-webkit-datetime-edit-text {
-  padding: 0 1px;
+.when-picker {
+  position: relative;
+}
+
+.when-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  font-size: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 200ms ease-in-out, background 200ms ease-in-out;
+}
+
+.when-trigger:hover {
+  border-color: var(--accent);
+}
+
+.when-trigger:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+/* Muted like every other affordance in the manager — the label is the content. */
+.when-trigger .codicon {
+  font-size: 14px;
   color: var(--muted);
 }
 
-/* The segment being edited, in the one colour Chronos spends on time. The
-   browser default is the OS selection blue, which belongs to no theme here. */
-.field-input::-webkit-datetime-edit-year-field:focus,
-.field-input::-webkit-datetime-edit-month-field:focus,
-.field-input::-webkit-datetime-edit-day-field:focus,
-.field-input::-webkit-datetime-edit-hour-field:focus,
-.field-input::-webkit-datetime-edit-minute-field:focus,
-.field-input::-webkit-datetime-edit-ampm-field:focus {
-  border-radius: 3px;
-  outline: none;
-  background: color-mix(in srgb, var(--sodium) 30%, transparent);
+/* Laid over what follows it rather than pushing the grid open, so the fields
+   beside When do not jump when it opens. */
+.picker-popover {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 5;
+  width: 260px;
+  margin-top: 4px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--glass-bg);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 6px 20px rgb(0 0 0 / 28%);
+}
+
+.picker-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-bottom: 8px;
+  font-size: 0.85em;
+}
+
+.picker-nav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color 200ms ease-in-out, background 200ms ease-in-out;
+}
+
+.picker-nav:hover {
+  background: var(--raised);
   color: var(--vscode-foreground);
 }
 
-/* The calendar glyph, muted like every other affordance in the manager and lit
-   on hover — the same move the sidebar row actions make. */
-.field-input::-webkit-calendar-picker-indicator {
-  padding: 2px;
-  border-radius: 3px;
-  cursor: pointer;
-  opacity: 0.5;
-  transition: opacity 200ms ease-in-out, background 200ms ease-in-out;
+.picker-nav:focus-visible,
+.picker-day:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
 }
 
-.field-input::-webkit-calendar-picker-indicator:hover {
-  opacity: 1;
+.picker-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+}
+
+.picker-weekday {
+  padding: 2px 0;
+  font-size: 0.72em;
+  text-align: center;
+  color: var(--muted);
+}
+
+.picker-day {
+  aspect-ratio: 1;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--vscode-foreground);
+  font-size: 0.82em;
+  cursor: pointer;
+  transition: background 200ms ease-in-out, border-color 200ms ease-in-out;
+}
+
+.picker-day:hover {
   background: var(--raised);
+}
+
+/* Past days recede but stay clickable — the old input allowed them too. */
+.picker-day.is-muted {
+  color: var(--muted);
+}
+
+.picker-day.is-today {
+  border-color: var(--accent);
+}
+
+/* The scheduled instant, so it gets sodium — the one thing sodium is spent on.
+   Last, so it wins over is-muted on a day already gone. */
+.picker-day.is-selected {
+  border-color: var(--sodium);
+  background: var(--sodium);
+  color: var(--vscode-editor-background);
+}
+
+.picker-time {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.picker-time .field-input {
+  flex: 1;
+  padding: 3px 4px;
+  font-size: 0.85em;
 }
 
 .field.is-spaced {
@@ -636,6 +752,14 @@ select.field-input {
 .button.is-danger:hover {
   background: color-mix(in srgb, var(--danger) 22%, transparent);
   color: var(--danger);
+}
+
+/* The schedule toggle turns sodium only while the job is actually live —
+   the one colour Chronos spends on liveness. Paused/unscheduled stay quiet. */
+.schedule-toggle.is-scheduled {
+  border-color: var(--sodium);
+  background: color-mix(in srgb, var(--sodium) 14%, transparent);
+  color: var(--sodium);
 }
 
 .button:focus-visible,

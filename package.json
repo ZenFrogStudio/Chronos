@@ -2,7 +2,7 @@
   "name": "chronos",
   "displayName": "Chronos",
   "description": "Schedule Claude Code tasks from Markdown plan files.",
-  "version": "0.8.0-rc.18",
+  "version": "0.8.0-rc.23",
   "publisher": "Z3n",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -36,7 +36,8 @@
       "chronos": [
         {
           "id": "chronos.tasks",
-          "name": "Tasks"
+          "name": "Tasks",
+          "type": "webview"
         }
       ]
     },
@@ -63,30 +64,10 @@
         "command": "chronos.addTask",
         "title": "Chronos: Add Task",
         "icon": "$(add)"
-      },
-      {
-        "command": "chronos.generatePlan",
-        "title": "Generate plan...",
-        "icon": "$(lightbulb)"
-      },
-      {
-        "command": "chronos.editTask",
-        "title": "Edit Task",
-        "icon": "$(pencil)"
-      },
-      {
-        "command": "chronos.deleteTask",
-        "title": "Delete Task",
-        "icon": "$(trash)"
       }
     ],
     "menus": {
       "view/title": [
-        {
-          "command": "chronos.addTask",
-          "when": "view == chronos.tasks",
-          "group": "navigation@1"
-        },
         {
           "command": "chronos.openManager",
           "when": "view == chronos.tasks",
@@ -95,27 +76,6 @@
         {
           "command": "chronos.addFiles",
           "when": "view == chronos.tasks"
-        }
-      ],
-      "view/item/context": [
-        {
-          "command": "chronos.generatePlan",
-          "when": "view == chronos.tasks && viewItem == task",
-          "group": "inline@1"
-        },
-        {
-          "command": "chronos.editTask",
-          "when": "view == chronos.tasks && viewItem == task",
-          "group": "inline@2"
-        },
-        {
-          "command": "chronos.deleteTask",
-          "when": "view == chronos.tasks && viewItem == task",
-          "group": "inline@3"
-        },
-        {
-          "command": "chronos.generatePlan",
-          "when": "view == chronos.tasks && viewItem == task"
         }
       ],
       "explorer/context": [
@@ -135,18 +95,6 @@
       "commandPalette": [
         {
           "command": "chronos.scheduleFile",
-          "when": "false"
-        },
-        {
-          "command": "chronos.generatePlan",
-          "when": "false"
-        },
-        {
-          "command": "chronos.editTask",
-          "when": "false"
-        },
-        {
-          "command": "chronos.deleteTask",
           "when": "false"
         }
       ]
