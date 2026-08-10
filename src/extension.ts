@@ -5,9 +5,10 @@ import { adoptGlobal, claimAdoption } from './adopt';
 import { AGENTS } from './agents';
 import { consolidate } from './consolidate';
 import { seedLibrary } from './library';
-import { initLog, log, logConsolidation, pruneLogs } from './log';
+import { initLog, log, logConsolidation, logRetirement, pruneLogs } from './log';
 import { Manager } from './manager';
 import { migrate } from './migrate';
+import { retireCompletedPlans } from './retire';
 import { ChronosPaths, ensureRoot, pathsFor } from './roots';
 import { probeAgent, Runner } from './runner';
 import { Scheduler } from './scheduler';
@@ -44,13 +45,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   const store = await Store.create(paths().state);
   const runner = new Runner(store, () => paths().logs, () => paths().results);
-  const scheduler = new Scheduler(store, runner, () => paths().lock);
+
+  /** A one-shot that has run has no future, so its file leaves the library. */
+  const retire = async (): Promise<void> =>
+    logRetirement(await retireCompletedPlans(store, paths().plans, paths().archivedPlans));
+
+  const scheduler = new Scheduler(store, runner, () => paths().lock, retire);
 
   pruneLogs(paths().logs, config().get<number>('logRetentionDays', 30));
 
   // Plans scheduled in place by an older version are copied in here, so the rest
-  // of the session can assume every scheduled plan is a library plan.
-  logConsolidation(await consolidate(store, paths().plans));
+  // of the session can assume every scheduled plan is a library plan. The sweep
+  // that follows is what tidies plans already run by a build that kept them.
+  logConsolidation(await consolidate(store, paths().plans, paths().archivedPlans));
+  await retire();
 
   /**
    * Moves this window to another folder in the workspace. Everything downstream
@@ -84,7 +92,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     seedIfNew(paths(), ensureRoot(paths()));
     await store.retarget(paths().state);
     pruneLogs(paths().logs, config().get<number>('logRetentionDays', 30));
-    logConsolidation(await consolidate(store, paths().plans));
+    logConsolidation(await consolidate(store, paths().plans, paths().archivedPlans));
+    await retire();
 
     manager.restartWatching();
     manager.post();
@@ -92,7 +101,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     log.info(`switched to ${folder}`);
   };
 
-  const manager = new Manager(context.extensionUri, store, scheduler, paths, switchFolder);
+  // The manifest's own configuration schema, which is what the manager's
+  // Settings page is generated from — one source of truth for every setting's
+  // type, default, range and help text.
+  const manager = new Manager(
+    context.extensionUri,
+    store,
+    scheduler,
+    paths,
+    switchFolder,
+    context.extension.packageJSON.contributes.configuration.properties
+  );
   const status = new StatusItem(store);
 
   // A webview rather than a tree: a to-do list needs an always-there text field,

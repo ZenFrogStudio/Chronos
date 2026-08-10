@@ -60,9 +60,9 @@ capture → generate → schedule → run
 Back out at any point — Escape, closing the terminal, never approving — and
 nothing is created; the task stays exactly where it was.
 
-You pick the model each time from a dropdown. `chronos.planModel` remembers the
-last one you chose, and does not affect scheduled runs, which use each plan's
-own model setting.
+Planning uses whichever model `chronos.planModel` names — set it on the manager's
+**Settings** page, behind the gear beside the plan library. It does not affect
+scheduled runs, which use each plan's own model setting.
 
 A task is a `.md` file in `.chronos/tasks`, so it is just a file like everything
 else here: it can grow past one line, you can edit it in a real editor, and it
@@ -78,6 +78,7 @@ your-project/
   .chronos/
     plans/          your plan .md files
     tasks/          the task inbox
+    archive/        plans and tasks that have left the library
     results/        run transcripts
     logs/           raw event streams
     state.json      schedules and run history
@@ -110,6 +111,19 @@ the list, so editing a plan outside Chronos can never desynchronise anything.
 Every scheduled plan lives here; there is only one kind of plan. Delete a plan
 file from the folder and its schedule goes with it, whether Chronos is open at
 the time or not.
+
+**A plan that has run moves to `.chronos/archive/plans`.** A one-shot has no
+future once it has completed, so its file leaves the library and its row leaves
+the list — the run card and its transcript stay under **Runs**. Only a
+*successful* run archives: a plan that failed or was cancelled stays in the
+library, visible, so you can fix it and run it again. Recurring plans never
+leave. Bringing one back is the **Import** button, and nothing in the archive is
+ever pruned.
+
+Note that pressing **Run now** on a one-shot archives it as soon as it completes,
+even if its scheduled time has not arrived — the plan is leaving the library, so
+that occurrence is consumed with it rather than firing later out of a folder you
+are not looking at.
 
 The in-app editor autosaves on blur. It is a plain textarea — for real editing,
 **Open in editor** gives you the actual VS Code editor on the same file. If a

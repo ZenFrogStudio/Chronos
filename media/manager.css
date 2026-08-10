@@ -1,11 +1,15 @@
 /* Chronos manager. The shell is derived from VS Code theme vars so it adapts to
-   any theme. Chronos owns one colour — sodium — spent only on liveness and
-   imminence. Global values only — no component tokens. */
+   any theme. Chronos owns two colours — sodium, spent only on liveness and
+   imminence, and teal, spent on the filled primary buttons and on every accent,
+   outline and link, so that emphasis reads as ours rather than as the editor's
+   stock blue. Global values only — no component tokens. */
 
 :root {
   --border: var(--vscode-widget-border, color-mix(in srgb, var(--vscode-foreground) 18%, transparent));
-  --accent: var(--vscode-focusBorder);
+  --accent: #12A3A9;
   --sodium: #E0A458;
+  --action: #0E8A8F;
+  --action-hover: #12A3A9;
   --ok: var(--vscode-charts-green, #3FB950);
   --muted: var(--vscode-descriptionForeground);
   --danger: var(--vscode-errorForeground);
@@ -14,9 +18,13 @@
   --radius: 6px;
 }
 
-/* Amber and green both need darkening to stay legible on a light background. */
+/* Amber, teal and green all need darkening to stay legible on a light
+   background. */
 body.vscode-light {
   --sodium: #9A5B0F;
+  --accent: #0A6E73;
+  --action: #0A6E73;
+  --action-hover: #0E8A8F;
   --ok: #1A7F37;
 }
 
@@ -24,6 +32,9 @@ body.vscode-light {
    which carries both vscode-high-contrast and vscode-high-contrast-light. */
 body.vscode-high-contrast {
   --sodium: var(--vscode-focusBorder);
+  --accent: var(--vscode-focusBorder);
+  --action: var(--vscode-button-background);
+  --action-hover: var(--vscode-button-hoverBackground);
 }
 
 * {
@@ -124,11 +135,64 @@ body.dragging .drop-overlay {
   font-weight: 600;
 }
 
+/* Positioned, because the library sash is absolute against this box. The 260px
+   is the default library width, and `LIBRARY_DEFAULT` in manager.js must match
+   it — otherwise the pane jumps the first time it is dragged. */
 .shell {
+  position: relative;
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: 260px 1fr;
+  grid-template-columns: var(--library-width, 260px) 1fr;
+}
+
+/* --- Sashes --- */
+
+/* A thin strip over each pane boundary, dragged with pointer capture in
+   manager.js. Nothing is drawn until you point at it. */
+.sash {
+  position: absolute;
+  z-index: 5; /* over both panes; the drop overlay is 10 */
+  background: none;
+}
+
+.sash-x {
+  top: 0;
+  bottom: 0;
+  left: var(--library-width, 260px);
+  width: 6px;
+  margin-left: -3px; /* straddles the library's right border */
+  cursor: col-resize;
+}
+
+.sash-y {
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 6px;
+  cursor: row-resize;
+}
+
+.sash:hover,
+.sash.is-active {
+  background: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+/* Collapsed, the panel is its header — there is nothing to resize. */
+.activity.is-collapsed .sash-y {
+  display: none;
+}
+
+/* The pointer is captured, so it passes over buttons and text while dragging.
+   Both must yield to the sash's cursor and stop selecting. */
+body.is-resizing * {
+  cursor: inherit !important;
+  user-select: none !important;
+}
+
+/* Or the panel eases toward each pointer position and lags the drag. */
+body.is-resizing .activity {
+  transition: none;
 }
 
 /* --- Library pane --- */
@@ -288,8 +352,7 @@ body.dragging .drop-overlay {
 
 .plan-item.is-selected {
   border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
-  background: var(--vscode-list-activeSelectionBackground);
-  color: var(--vscode-list-activeSelectionForeground);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
 }
 
 /* The one status marker left in the list: a plan running right now, visible
@@ -500,6 +563,28 @@ select.field-input {
   background: var(--vscode-input-background);
   color: var(--vscode-input-foreground);
   font: inherit;
+}
+
+/* --- Settings ---
+   One field per row rather than the grid the Schedule section uses: help text
+   under each control makes a multi-column layout ragged. Capped because a
+   full-width text input across a wide editor tab reads badly. */
+
+.settings {
+  max-width: 560px;
+}
+
+.field-help {
+  margin: 2px 0 0;
+  font-size: 0.78em;
+  color: var(--muted);
+}
+
+/* A checkbox belongs beside its label, not under it. */
+.field-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 /* --- The when picker ---
@@ -715,15 +800,17 @@ select.field-input {
   padding: 4px 10px;
   border: 1px solid transparent;
   border-radius: var(--radius);
-  background: var(--vscode-button-background);
-  color: var(--vscode-button-foreground);
+  background: var(--action);
+  /* The fill is ours now, not the theme's, so the theme's paired text colour is
+     no longer a guarantee — white is fixed against it, as on the picker day. */
+  color: #FFFFFF;
   font: inherit;
   cursor: pointer;
   transition: background 200ms ease-in-out;
 }
 
 .button:hover {
-  background: var(--vscode-button-hoverBackground);
+  background: var(--action-hover);
 }
 
 .button.is-quiet {
@@ -756,7 +843,7 @@ select.field-input {
   padding: 0;
   border: none;
   background: none;
-  color: var(--vscode-textLink-foreground);
+  color: var(--accent);
   font: inherit;
   font-size: 0.85em;
   cursor: pointer;
@@ -944,11 +1031,14 @@ select.field-input {
 
 /* --- Runs panel: every plan at once, pinned across the bottom --- */
 
+/* Positioned for its own sash, and the 220px default is duplicated as
+   `ACTIVITY_DEFAULT` in manager.js. */
 .activity {
+  position: relative;
   display: flex;
   flex-direction: column;
   flex: none;
-  height: 220px;
+  height: var(--activity-height, 220px);
   overflow: hidden;
   border-top: 1px solid var(--border);
   background: var(--glass-bg);
@@ -1060,7 +1150,7 @@ select.field-input {
 }
 
 .activity-plan:hover {
-  color: var(--vscode-textLink-foreground);
+  color: var(--accent);
 }
 
 .activity-plan:focus-visible {
@@ -1141,5 +1231,11 @@ select.field-input {
 
   .activity-plan {
     flex: 0 0 110px;
+  }
+
+  /* Stacked panes have no boundaries to drag. The two rules above re-declare
+     the sizes outright, so a dragged width or height is overridden here too. */
+  .sash {
+    display: none;
   }
 }

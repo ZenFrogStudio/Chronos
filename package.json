@@ -2,7 +2,7 @@
   "name": "chronos",
   "displayName": "Chronos",
   "description": "Schedule Claude Code tasks from Markdown plan files.",
-  "version": "0.8.0-rc.30",
+  "version": "0.8.0-rc.35",
   "publisher": "Z3n",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -152,7 +152,7 @@
             "Sonnet (latest)",
             "Haiku (latest)"
           ],
-          "markdownDescription": "Model used when generating a plan from a task in the **Tasks** view. Chosen from a dropdown each time you press **Generate plan**; this remembers your last choice. It does not affect scheduled runs, which use each plan's own model."
+          "markdownDescription": "Model used whenever Chronos opens a planning session — the **Generate plan** button on a task in the **Tasks** view. Leave as **Account default** to let Claude choose. It does not affect scheduled runs, which use each plan's own model."
         },
         "chronos.showTerminalOnRun": {
           "type": "boolean",

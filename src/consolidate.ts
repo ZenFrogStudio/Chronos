@@ -19,6 +19,9 @@ plan library, addressed by name.
     copy between series that point at the same source file;
   //Repoint those series at the copy, leaving the working directory alone so the
     run still happens where it used to;
+  //Leave an archived plan alone: a plan that has run is deliberately outside the
+    library (see `retire.ts`), not a stray to be hoovered up — re-importing it
+    would put it straight back in the list it just left;
   //Drop any series whose plan file no longer exists, along with its run history;
   //Report both, so the caller can log what was moved and what was discarded.*/
 
@@ -50,7 +53,8 @@ export interface ConsolidationReport {
  */
 export async function consolidate(
   store: SeriesStore,
-  dir: string
+  dir: string,
+  archiveDir: string
 ): Promise<ConsolidationReport> {
   const report: ConsolidationReport = { imported: [], droppedSchedules: [] };
 
@@ -70,7 +74,15 @@ export async function consolidate(
   const copies = new Map<string, library.PlanFile>();
 
   for (const series of [...store.getSeries()]) {
-    if (library.isInside(dir, series.filePath) || !fs.existsSync(series.filePath)) {
+    // An archived plan is outside the library on purpose — `retire.ts` put it
+    // there because it has run. Importing it back would undo that on the next
+    // tick. Nothing else happens to it either: its file exists, so the prune
+    // below leaves it be.
+    if (
+      library.isInside(dir, series.filePath) ||
+      library.isInside(archiveDir, series.filePath) ||
+      !fs.existsSync(series.filePath)
+    ) {
       continue;
     }
 

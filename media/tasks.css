@@ -1,28 +1,38 @@
 /* Chronos task inbox — the activity-bar view. Derived from VS Code theme vars so
    it adapts to any theme, and deliberately its own small sheet rather than the
-   manager's: this panel is a list, an input and a button. Chronos owns one
-   colour — sodium — spent only on liveness, which here means a plan being
-   written right now. Global values only — no component tokens. */
+   manager's: this panel is a list, an input and a button. Chronos owns two
+   colours — sodium, spent only on liveness, which here means a plan being
+   written right now, and teal, spent on the filled primary buttons and on every
+   accent, outline and link, so that emphasis reads as ours rather than as the
+   editor's stock blue. Global values only — no component tokens. */
 
 :root {
   --border: var(--vscode-widget-border, color-mix(in srgb, var(--vscode-foreground) 18%, transparent));
-  --accent: var(--vscode-focusBorder);
+  --accent: #12A3A9;
   --sodium: #E0A458;
+  --action: #0E8A8F;
+  --action-hover: #12A3A9;
   --muted: var(--vscode-descriptionForeground);
   --danger: var(--vscode-errorForeground);
   --raised: color-mix(in srgb, var(--vscode-foreground) 4%, transparent);
   --radius: 6px;
 }
 
-/* Amber needs darkening to stay legible on a light background. */
+/* Amber and teal both need darkening to stay legible on a light background. */
 body.vscode-light {
   --sodium: #9A5B0F;
+  --accent: #0A6E73;
+  --action: #0A6E73;
+  --action-hover: #0E8A8F;
 }
 
 /* Never paint a brand colour over an accessibility theme. Covers light HC too,
    which carries both vscode-high-contrast and vscode-high-contrast-light. */
 body.vscode-high-contrast {
   --sodium: var(--vscode-focusBorder);
+  --accent: var(--vscode-focusBorder);
+  --action: var(--vscode-button-background);
+  --action-hover: var(--vscode-button-hoverBackground);
 }
 
 * {
@@ -80,15 +90,17 @@ body.vscode-high-contrast-light {
   padding: 4px 10px;
   border: 1px solid transparent;
   border-radius: var(--radius);
-  background: var(--vscode-button-background);
-  color: var(--vscode-button-foreground);
+  background: var(--action);
+  /* The fill is ours now, not the theme's, so the theme's paired text colour is
+     no longer a guarantee — white is fixed against it. */
+  color: #FFFFFF;
   font: inherit;
   cursor: pointer;
   transition: background 200ms ease-in-out;
 }
 
 .button:hover {
-  background: var(--vscode-button-hoverBackground);
+  background: var(--action-hover);
 }
 
 .button:focus-visible,
@@ -114,7 +126,7 @@ body.vscode-high-contrast-light {
 
 /* Nothing to generate from, so the hover must not suggest otherwise. */
 .button:disabled:hover {
-  background: var(--vscode-button-background);
+  background: var(--action);
 }
 
 /* --- The list --- */

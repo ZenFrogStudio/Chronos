@@ -11,6 +11,7 @@ import { log, logConsolidation } from './log';
 import { ChronosPaths } from './roots';
 import { Scheduler } from './scheduler';
 import { createSeries, defaultCwd } from './series';
+import { coerceSetting, SettingGroup, settingGroups } from './settings';
 import { Store } from './store';
 import { AgentId, TaskSeries } from './types';
 
@@ -38,7 +39,9 @@ type Inbound =
   | { type: 'revealResults' }
   | { type: 'revealArchive' }
   | { type: 'openLog'; id: string }
-  | { type: 'switchFolder'; folder: string };
+  | { type: 'switchFolder'; folder: string }
+  | { type: 'updateSetting'; key: string; value: unknown }
+  | { type: 'openNativeSettings' };
 
 /**
  * The plan manager: a single editor-tab webview. Deliberately one panel reused
@@ -57,6 +60,9 @@ export class Manager implements vscode.Disposable {
   private watchDebounce: NodeJS.Timeout | undefined;
   private readonly storeListener: vscode.Disposable;
   private readonly leadershipListener: vscode.Disposable;
+  private readonly configListener: vscode.Disposable;
+  /** The Settings page, built once: a schema cannot change at runtime. */
+  private readonly settingGroups: SettingGroup[];
   /** Sticky, unlike a notice: a broken `claudePath` stays broken until fixed. */
   private setupProblem: string | undefined;
   /** Engines that answered `--version`. Optimistic until the probes land, so
@@ -71,17 +77,38 @@ export class Manager implements vscode.Disposable {
     private readonly paths: () => ChronosPaths,
     /** Owned by `activate`, which is the only place that can move the store, the
      *  scheduler's lock and this panel together. */
-    private readonly switchFolder: (folder: string) => Promise<void>
+    private readonly switchFolder: (folder: string) => Promise<void>,
+    /** `contributes.configuration.properties`, straight from the manifest. The
+     *  Settings page is generated from it rather than from a second table, so a
+     *  setting cannot exist without a control. */
+    configProperties: Record<string, unknown>
   ) {
+    this.settingGroups = settingGroups(configProperties);
     this.storeListener = store.onDidChange(() => this.post());
     // A non-leading window's store never changes, so the banner below would
     // otherwise never appear or clear.
     this.leadershipListener = scheduler.onDidChangeLeadership(() => this.post());
+    // Both directions: this is what keeps the Settings page in step with an edit
+    // made in VS Code's own Settings editor, and what redraws a control after
+    // the page's own write lands.
+    this.configListener = vscode.workspace.onDidChangeConfiguration((e) => {
+      if (!e.affectsConfiguration('chronos')) {
+        return;
+      }
+      // The watcher is bound to a folder that this one setting moves. Nothing
+      // else needs invalidating: every module reads config live, and `paths()`
+      // is a thunk that re-resolves on each call.
+      if (e.affectsConfiguration('chronos.libraryPath')) {
+        this.restartWatching();
+      }
+      this.post();
+    });
   }
 
   dispose(): void {
     this.storeListener.dispose();
     this.leadershipListener.dispose();
+    this.configListener.dispose();
     this.stopWatching();
     this.panel?.dispose();
   }
@@ -229,7 +256,7 @@ export class Manager implements vscode.Disposable {
   }
 
   private async dropSchedulesWithNoFile(dir: string): Promise<void> {
-    logConsolidation(await consolidate(this.store, dir));
+    logConsolidation(await consolidate(this.store, dir, this.paths().archivedPlans));
   }
 
   private stopWatching(): void {
@@ -453,6 +480,40 @@ export class Manager implements vscode.Disposable {
         return;
       }
 
+      // User scope, matching what the old model QuickPick wrote: these are
+      // preferences about how you work, not facts about one project.
+      case 'updateSetting': {
+        const field = this.settingGroups
+          .flatMap((group) => group.fields)
+          .find((f) => f.key === message.key);
+        if (!field) {
+          log.warn(`updateSetting: no such setting ${message.key}`);
+          return;
+        }
+
+        const value = coerceSetting(field, message.value);
+        if (value === undefined) {
+          // Re-posted rather than silently dropped, so the control snaps back to
+          // what is actually stored instead of showing a value that never landed.
+          log.warn(`updateSetting: refused ${message.key}=${JSON.stringify(message.value)}`);
+          this.post();
+          return;
+        }
+
+        // No post() on success: the configuration listener above does it, and
+        // doing both would redraw the field twice under the user's cursor.
+        await vscode.workspace
+          .getConfiguration('chronos')
+          .update(field.key, value, vscode.ConfigurationTarget.Global);
+        return;
+      }
+
+      // The escape hatch this page deliberately does not cover: workspace scope,
+      // and the JSON view.
+      case 'openNativeSettings':
+        await vscode.commands.executeCommand('workbench.action.openSettings', '@ext:Z3n.chronos');
+        return;
+
       default:
         log.warn(`unhandled manager message: ${JSON.stringify(message)}`);
     }
@@ -534,6 +595,7 @@ export class Manager implements vscode.Disposable {
 
     const paths = this.paths();
     const dir = paths.plans;
+    const config = vscode.workspace.getConfiguration('chronos');
 
     this.panel.webview.postMessage({
       type: 'state',
@@ -559,6 +621,15 @@ export class Manager implements vscode.Disposable {
       // dropdown cannot offer something that would fail at fire time.
       agents: AGENTS.filter((agent) => this.availableAgents.includes(agent.id)),
       costLast7Days: this.store.costLast7Days(),
+      // The Settings page: its shape, and what each control currently reads.
+      // The shape is fixed, the values are not, so only the values are looked up
+      // afresh each time.
+      settings: this.settingGroups,
+      settingValues: Object.fromEntries(
+        this.settingGroups
+          .flatMap((group) => group.fields)
+          .map((field) => [field.key, config.get(field.key, field.default)])
+      ),
       setupProblem: this.setupProblem,
       schedulerElsewhere: !this.scheduler.leading
     });

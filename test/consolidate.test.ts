@@ -38,15 +38,18 @@ class FakeStore implements SeriesStore {
 
 let dir: string;
 let outside: string;
+let archive: string;
 
 beforeEach(() => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chronos-lib-'));
   outside = fs.mkdtempSync(path.join(os.tmpdir(), 'chronos-out-'));
+  archive = fs.mkdtempSync(path.join(os.tmpdir(), 'chronos-arch-'));
 });
 
 afterEach(() => {
   fs.rmSync(dir, { recursive: true, force: true });
   fs.rmSync(outside, { recursive: true, force: true });
+  fs.rmSync(archive, { recursive: true, force: true });
 });
 
 /** Writes a plan file outside the library and returns its path. */
@@ -77,7 +80,7 @@ describe('consolidate — importing outside plans', () => {
     const sourcePath = sourceFile('nightly.md', '# Nightly\n');
     const store = new FakeStore([series('a', sourcePath)]);
 
-    const report = await consolidate(store, dir);
+    const report = await consolidate(store, dir, archive);
 
     const moved = store.byId('a');
     assert.ok(moved);
@@ -92,7 +95,7 @@ describe('consolidate — importing outside plans', () => {
     const sourcePath = sourceFile('keep-me.md', 'original');
     const store = new FakeStore([series('a', sourcePath)]);
 
-    await consolidate(store, dir);
+    await consolidate(store, dir, archive);
 
     assert.equal(fs.existsSync(sourcePath), true);
     assert.equal(fs.readFileSync(sourcePath, 'utf8'), 'original');
@@ -104,7 +107,7 @@ describe('consolidate — importing outside plans', () => {
     const cwd = path.join(outside, 'some-project');
     const store = new FakeStore([series('a', sourceFile('nightly.md'), { cwd })]);
 
-    await consolidate(store, dir);
+    await consolidate(store, dir, archive);
 
     assert.equal(store.byId('a')?.cwd, cwd);
   });
@@ -119,7 +122,7 @@ describe('consolidate — importing outside plans', () => {
       })
     ]);
 
-    await consolidate(store, dir);
+    await consolidate(store, dir, archive);
 
     const moved = store.byId('a');
     assert.deepEqual(moved?.recurrence, { daysOfWeek: [1, 3, 5], timeLocal: '07:30' });
@@ -134,7 +137,7 @@ describe('consolidate — importing outside plans', () => {
     const sourcePath = sourceFile('shared.md');
     const store = new FakeStore([series('a', sourcePath), series('b', sourcePath)]);
 
-    const report = await consolidate(store, dir);
+    const report = await consolidate(store, dir, archive);
 
     assert.equal(listPlans(dir).length, 1);
     assert.equal(report.imported.length, 1);
@@ -145,7 +148,7 @@ describe('consolidate — importing outside plans', () => {
     const existing = createPlan(dir, 'Nightly', 'the library one');
     const store = new FakeStore([series('a', sourceFile('nightly.md', 'the outside one'))]);
 
-    await consolidate(store, dir);
+    await consolidate(store, dir, archive);
 
     assert.equal(store.byId('a')?.fileName, 'nightly-2.md');
     assert.equal(readPlan(dir, 'nightly-2.md'), 'the outside one');
@@ -156,7 +159,7 @@ describe('consolidate — importing outside plans', () => {
     const plan = createPlan(dir, 'Already Here');
     const store = new FakeStore([series('a', plan.filePath)]);
 
-    const report = await consolidate(store, dir);
+    const report = await consolidate(store, dir, archive);
 
     assert.deepEqual(report.imported, []);
     assert.equal(store.byId('a')?.filePath, plan.filePath);
@@ -167,15 +170,43 @@ describe('consolidate — importing outside plans', () => {
     // Idempotent by nature rather than by a version gate: after one pass every
     // path is already inside the library, so there is nothing left to find.
     const store = new FakeStore([series('a', sourceFile('nightly.md'))]);
-    await consolidate(store, dir);
+    await consolidate(store, dir, archive);
     const after = store.byId('a');
 
-    const report = await consolidate(store, dir);
+    const report = await consolidate(store, dir, archive);
 
     assert.deepEqual(report.imported, []);
     assert.deepEqual(report.droppedSchedules, []);
     assert.deepEqual(store.byId('a'), after);
     assert.equal(listPlans(dir).length, 1);
+  });
+});
+
+describe('consolidate — archived plans', () => {
+  it('should_not_re_import_a_plan_that_has_been_archived', async () => {
+    // A plan that has run is outside the library on purpose. Copying it back
+    // would put it straight into the list it just left, on the next tick.
+    const archived = createPlan(archive, 'Nightly', '# Nightly\n');
+    const store = new FakeStore([series('a', archived.filePath, { spent: true })]);
+
+    const report = await consolidate(store, dir, archive);
+
+    assert.deepEqual(report.imported, []);
+    assert.deepEqual(listPlans(dir), []);
+    assert.equal(store.byId('a')?.filePath, archived.filePath);
+  });
+
+  it('should_not_drop_the_schedule_of_an_archived_plan', async () => {
+    // The run history hangs off the series, and the Runs panel reads the plan's
+    // name from it. Pruning the series would take both.
+    const archived = createPlan(archive, 'Nightly');
+    const store = new FakeStore([series('a', archived.filePath, { spent: true })]);
+
+    const report = await consolidate(store, dir, archive);
+
+    assert.deepEqual(store.removed, []);
+    assert.deepEqual(report.droppedSchedules, []);
+    assert.equal(store.getSeries().length, 1);
   });
 });
 
@@ -186,7 +217,7 @@ describe('consolidate — pruning schedules with no file', () => {
     const store = new FakeStore([series('a', plan.filePath)]);
     fs.unlinkSync(plan.filePath);
 
-    const report = await consolidate(store, dir);
+    const report = await consolidate(store, dir, archive);
 
     assert.deepEqual(store.removed, ['a']);
     assert.deepEqual(report.droppedSchedules, ['deleted.md']);
@@ -197,7 +228,7 @@ describe('consolidate — pruning schedules with no file', () => {
     // Nothing to import and nothing to run: the source vanished before upgrade.
     const store = new FakeStore([series('a', path.join(outside, 'never-existed.md'))]);
 
-    const report = await consolidate(store, dir);
+    const report = await consolidate(store, dir, archive);
 
     assert.deepEqual(store.removed, ['a']);
     assert.deepEqual(report.imported, []);
@@ -210,7 +241,7 @@ describe('consolidate — pruning schedules with no file', () => {
     const store = new FakeStore([series('a', kept.filePath), series('b', doomed.filePath)]);
     fs.unlinkSync(doomed.filePath);
 
-    await consolidate(store, dir);
+    await consolidate(store, dir, archive);
 
     assert.deepEqual(store.removed, ['b']);
     assert.deepEqual(store.getSeries().map((s) => s.id), ['a']);
@@ -224,7 +255,7 @@ describe('consolidate — unreadable library', () => {
     const gone = path.join(dir, 'not-mounted');
     const store = new FakeStore([series('a', path.join(gone, 'nightly.md'))]);
 
-    const report = await consolidate(store, gone);
+    const report = await consolidate(store, gone, archive);
 
     assert.ok(report.libraryUnreadable, 'the report must say why nothing happened');
     assert.deepEqual(store.removed, []);
@@ -235,7 +266,7 @@ describe('consolidate — unreadable library', () => {
     const sourcePath = sourceFile('nightly.md');
     const store = new FakeStore([series('a', sourcePath)]);
 
-    const report = await consolidate(store, path.join(dir, 'not-mounted'));
+    const report = await consolidate(store, path.join(dir, 'not-mounted'), archive);
 
     assert.deepEqual(report.imported, []);
     assert.equal(store.byId('a')?.filePath, sourcePath, 'the series must keep its old path');
@@ -246,7 +277,7 @@ describe('consolidate — nothing to do', () => {
   it('should_succeed_on_an_empty_schedule', async () => {
     const store = new FakeStore([]);
 
-    const report = await consolidate(store, dir);
+    const report = await consolidate(store, dir, archive);
 
     assert.deepEqual(report, { imported: [], droppedSchedules: [] });
   });

@@ -32,7 +32,9 @@ export class Scheduler implements vscode.Disposable {
     private readonly runner: Runner,
     /** Resolved per tick: the lock lives beside the folder it arbitrates, so it
      *  moves when the active folder does. */
-    private readonly lockFile: () => string
+    private readonly lockFile: () => string,
+    /** Moves plans that have nothing left to do out of the library. See `retire.ts`. */
+    private readonly retirePlans: () => Promise<void>
   ) {
     this.subscription = runner.onDidFinish((e) => {
       void this.onFinished(e);
@@ -262,10 +264,14 @@ export class Scheduler implements vscode.Disposable {
             'permission denial(s) — part of the plan may not have run.'
         );
       }
-      return;
+    } else {
+      await this.afterTerminalOutcome(run, event.outcome.retryable);
     }
 
-    await this.afterTerminalOutcome(run, event.outcome.retryable);
+    // Deliberately after `afterTerminalOutcome` and on both branches: a retry
+    // queued above is already a `pending` run by the time the rule looks, which
+    // is what stops a failed plan being archived out from under its own retry.
+    await this.retirePlans();
   }
 
   /** Retry, or give up and report. */

@@ -41,16 +41,23 @@
               title="Show archive folder" aria-label="Show archive folder">
               <i class="codicon codicon-archive"></i>
             </button>
+            <button id="open-settings" class="icon-action" type="button"
+              title="Chronos settings" aria-label="Chronos settings">
+              <i class="codicon codicon-gear"></i>
+            </button>
           </div>
           <input id="search" class="search" type="search" placeholder="Search plans" aria-label="Search plans" />
         </header>
         <div id="plan-list" class="plan-list"></div>
       </aside>
 
+      <div id="library-sash" class="sash sash-x" role="separator" aria-orientation="vertical"></div>
+
       <section id="detail" class="detail"></section>
     </main>
 
     <section id="activity" class="activity">
+      <div id="activity-sash" class="sash sash-y" role="separator" aria-orientation="horizontal"></div>
       <header class="activity-head">
         <h2 class="activity-title">Runs</h2>
         <select id="activity-filter" class="activity-filter" data-focus-key="activity-filter" aria-label="Filter runs">

@@ -109,4 +109,34 @@ describe('source guards', () => {
       assert.ok(css.includes(`.${name}:before`), `${name} is not in media/codicon.css`);
     }
   });
+
+  it('should_keep_the_sash_defaults_in_step_with_the_stylesheet', () => {
+    // The default pane sizes are written twice: as the custom-property fallback
+    // the browser uses before anything is dragged, and as a constant in the
+    // clamp maths. Let them drift and the panel jumps the first time you touch
+    // its divider, with nothing in the log to say why.
+    const js = fs.readFileSync(path.join(MEDIA, 'manager.js'), 'utf8');
+    const css = fs.readFileSync(path.join(MEDIA, 'manager.css'), 'utf8');
+
+    const constant = (name: string) => js.match(new RegExp(`${name}\\s*=\\s*(\\d+)`))?.[1];
+    const fallback = (prop: string) => css.match(new RegExp(`var\\(${prop},\\s*(\\d+)px\\)`))?.[1];
+
+    assert.equal(constant('LIBRARY_DEFAULT'), fallback('--library-width'));
+    assert.equal(constant('ACTIVITY_DEFAULT'), fallback('--activity-height'));
+    // Both sides matching `undefined` would pass the two above vacuously.
+    assert.equal(constant('LIBRARY_DEFAULT'), '260');
+    assert.equal(constant('ACTIVITY_DEFAULT'), '220');
+  });
+
+  it('should_ship_a_sash_element_for_every_sash_rule', () => {
+    // The dividers are found by id, styled by class and never rendered by JS, so
+    // a renamed id leaves the CSS styling nothing and the drag silently dead.
+    const html = fs.readFileSync(path.join(MEDIA, 'manager.html'), 'utf8');
+    const js = fs.readFileSync(path.join(MEDIA, 'manager.js'), 'utf8');
+
+    for (const id of ['library-sash', 'activity-sash']) {
+      assert.ok(html.includes(`id="${id}"`), `media/manager.html has no #${id}`);
+      assert.ok(js.includes(`'${id}'`), `media/manager.js never looks up #${id}`);
+    }
+  });
 });

@@ -6,7 +6,6 @@ import { generateCommand, shellKind } from './launch';
 import * as library from './library';
 import { log } from './log';
 import { createNonce, Manager } from './manager';
-import { CLAUDE_MODELS } from './agents';
 import { ChronosPaths } from './roots';
 
 /**
@@ -265,11 +264,11 @@ export class TaskView implements vscode.WebviewViewProvider, vscode.Disposable {
     }
 
     const config = vscode.workspace.getConfiguration('chronos');
-    const model = await pickModel(config.get<string>('planModel', ''));
-    if (model === undefined) {
-      return;
-    }
-    await config.update('planModel', model, vscode.ConfigurationTarget.Global);
+    // Read, never asked: the answer was the same one as last time almost every
+    // time, and a prompt on the fastest path in the product — capture, press the
+    // lightbulb, start talking — is friction for a choice that rarely changes.
+    // It is set on the manager's Settings page instead.
+    const model = config.get<string>('planModel', '');
 
     const paths = this.paths();
     // The active folder, with nothing to ask about: a task now belongs to a
@@ -383,34 +382,6 @@ function askForTask(prompt: string, value: string): Thenable<string | undefined>
     value,
     placeHolder: 'e.g. Add an interval repeat option to the scheduler',
     validateInput: (input) => (input.trim() ? undefined : 'Describe the task in a line.')
-  });
-}
-
-/**
- * `showQuickPick` cannot preselect, and the remembered model is the answer most
- * of the time — so this uses the builder form purely to set `activeItems`.
- * Resolves to undefined when dismissed, which is distinct from '' meaning the
- * account default.
- */
-function pickModel(remembered: string): Promise<string | undefined> {
-  type ModelItem = vscode.QuickPickItem & { value: string };
-  const items: ModelItem[] = CLAUDE_MODELS.map((m) => ({ label: m.label, value: m.value }));
-
-  return new Promise((resolve) => {
-    const picker = vscode.window.createQuickPick<ModelItem>();
-    picker.title = 'Generate plan';
-    picker.placeholder = 'Which model should plan this task?';
-    picker.items = items;
-    picker.activeItems = items.filter((item) => item.value === remembered);
-    picker.onDidAccept(() => {
-      resolve(picker.selectedItems[0]?.value);
-      picker.hide();
-    });
-    picker.onDidHide(() => {
-      resolve(undefined);
-      picker.dispose();
-    });
-    picker.show();
   });
 }
 

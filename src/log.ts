@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import type { ConsolidationReport } from './consolidate';
+import type { RetirementReport } from './retire';
 
 let channel: vscode.OutputChannel | undefined;
 
@@ -77,5 +78,19 @@ export function logConsolidation(report: ConsolidationReport): void {
   }
   for (const name of report.droppedSchedules) {
     write('warn', `removed the schedule for ${name} — its plan file no longer exists`);
+  }
+}
+
+/**
+ * What retiring finished plans did. Here for the same reason as the above:
+ * `retire.ts` is free of `vscode` so it can be tested in plain Node.
+ *
+ * The log is the whole of the notice. A row leaving the plan list is a visible
+ * enough answer on its own, and a popup for something the user just watched
+ * happen is one more thing to dismiss.
+ */
+export function logRetirement(report: RetirementReport): void {
+  for (const move of report.archived) {
+    write('info', `archived ${move.planName} to the archive as ${move.archivedAs} — it has run`);
   }
 }

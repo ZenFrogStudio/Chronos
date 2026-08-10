@@ -20,7 +20,112 @@ shipped without any, because they lived in modules that import `vscode` and
 cannot load in the plain Node test runner. Closing the gaps meant moving the
 logic out; one of the moves also narrowed a guard.
 
+### Added
+
+- **The manager's three panels resize by dragging their dividers.** The plan
+  library was a hard 260px, which truncated any plan name longer than a few
+  words, and the Runs strip was 220px or hidden with nothing in between. There
+  is now a thin divider between the library and the detail pane, and another
+  above Runs: press and drag, and the panes follow the pointer. Each stops
+  before it can squeeze its neighbour out of usefulness, and a narrowed window
+  pulls an oversized pane back in rather than leaving it off screen. Below 700px
+  the panes stack as they already did and the dividers go away. The sizes are
+  remembered per tab — they survive a window reload alongside the Runs filter
+  and collapse state, but closing the Chronos tab and reopening it starts again
+  at 260 and 220. Nothing is written to `.chronos`.
+
+- **A Settings page in the manager, covering every Chronos setting.** Removing
+  the model prompt left `chronos.planModel` with nowhere visible to live: a
+  setting nothing asks about is a setting you have to go looking for, and VS
+  Code's own Settings editor is a different window with a search box in it. The
+  gear beside **Plan library** turns the detail pane into Settings — all thirteen
+  `chronos.*` settings, grouped under Planning, Engines, Locations, Running and
+  Limits, each with its control and its help text. Clicking a plan leaves the
+  page again.
+
+  The page is generated from the configuration schema already in
+  `package.json` rather than from a second hand-written table, so there is one
+  source of truth for every setting's type, default, range and help text, and
+  adding a setting to the manifest puts it on the page for free — anything not
+  named in a group lands under **Other** rather than vanishing. Edits write to
+  *user* scope, on change rather than on every keystroke, and a value the schema
+  refuses is dropped and the control snapped back to what is stored; a number
+  outside its range is clamped instead, so a typed `99` for **Max concurrent**
+  writes `5`. It reads both ways: changing a setting in VS Code's own editor
+  updates the page without a reload, and **Edit in VS Code Settings ↗** is the
+  escape hatch for the workspace-scope edits this page deliberately does not do.
+
 ### Changed
+
+- **Generate plan no longer asks which model should plan the task.** The
+  QuickPick fired before every planning session and preselected the answer you
+  gave last time, which was almost always the answer you wanted again — a prompt
+  on the fastest path in the product, capture a task and press the lightbulb, for
+  a choice that rarely changes. It reads `chronos.planModel` instead, which
+  already existed and already defaulted to *Account default*, meaning no
+  `--model` flag at all. The setting is not migrated: whatever it holds now is
+  what planning will use.
+
+- **The primary buttons now carry a Chronos teal instead of borrowing the
+  editor's blue accent.** **New plan**, **Save**, **Run now**, **Add** and
+  **Generate plan** were painted with `--vscode-button-background`, so the one
+  colour a user reads as *this is the thing to press* was whichever accent their
+  theme happened to ship — the same blue as every other extension. Teal is a
+  second colour Chronos owns outright, alongside sodium, and it is spent only on
+  those filled buttons. Light themes get a darkened variant so the white label
+  stays legible against it, the same treatment sodium already gets. High-contrast
+  themes are untouched: the buttons hand the colour back to the theme, because a
+  brand should never paint over an accessibility setting. The amber schedule
+  toggle is unchanged — it means imminence, not emphasis.
+
+- **The rest of the accent is teal now too, so the blue is gone entirely.**
+  Painting only the buttons left the odd result of a UI whose one owned colour
+  was teal but whose every outline and link was still the editor's blue, which
+  read as an accident rather than a choice. Three theme variables were leaking
+  it in: `--vscode-focusBorder`, which `--accent` was defined as and which paints
+  every focus ring, the drop target, the calendar's today marker and the weekday
+  toggles; the active-selection pair on the selected plan row; and the link
+  colour on the **Hide** buttons. `--accent` is now the same teal as the buttons,
+  which fixes all eighteen of its uses in one line per stylesheet, and the
+  selected plan and task rows trade their solid fill for a teal outline over a
+  faint teal wash so the row reads as chosen without shouting. Light themes take
+  the darkened variant, and high-contrast themes hand `--accent` back to
+  `--vscode-focusBorder` explicitly, keeping the same exemption the buttons have.
+
+- **A plan that has run now leaves the library.** A one-shot has no future once
+  it has finished — but its `.md` file used to sit in `.chronos/plans` forever.
+  The manager hid the row and the folder kept the file, so the list you saw in
+  Chronos and the folder you saw in Explorer disagreed about what your library
+  contained, and the disagreement grew by one plan every time something ran. The
+  file now moves to `.chronos/archive/plans` the moment the run completes, and
+  the row goes with it.
+
+  Only a **successful** run archives. A plan that failed or was cancelled stays
+  exactly where it is, and — this is the visible change — it is no longer hidden
+  from the list either. It is there to be fixed and run again, and it has to be
+  visible to be fixable; its row reads *Missed*, *Queued* or *Ran once* according
+  to how it actually ended. A plan is also left alone while it still has a retry
+  queued or a second attempt in flight, since that attempt needs the file.
+  Recurring plans never leave the library at all: they always have a next time.
+
+  **Nothing is lost.** The run card and its **Open result** link are untouched —
+  the series and its history stay in `state.json`, so the Runs panel still names
+  the plan and still opens the transcript. The file itself comes back with the
+  **Import** button, the same one you already use for any other file, and lands
+  in the library as a normal plan ready to schedule again.
+
+  One consequence worth stating plainly: pressing **Run now** on a one-shot
+  archives it as soon as it completes, *even if its scheduled time has not
+  arrived yet*, and that pending occurrence is consumed along with it. The
+  alternative is worse — a plan sitting in the archive folder that quietly fires
+  on Thursday, with no row anywhere in the manager to explain where it came from.
+  If you want it to run again on a schedule, import it back and schedule it.
+
+  The first window you open after upgrading sweeps the library once, so plans
+  that already ran under an older build are archived then rather than lingering
+  until they run again. Each move writes one line to the **Chronos** output
+  channel and nothing else — no popup, since the row disappearing in front of you
+  is answer enough.
 
 - **Deleting a plan or a task now archives the file instead of destroying it.**
   The × on a plan row and the bin in the task inbox both called `unlink`, which
@@ -405,6 +510,17 @@ logic out; one of the moves also narrowed a guard.
   only mean a second window on this same folder, so it says that and names the
   folder — and the **Run now** refusal says the same thing. If you ever see it in
   a window on a different project, that is a bug, and now you can tell.
+
+- **The published extension no longer contains the plans and transcripts of
+  whoever built it (0.8.0-rc.31).** A side effect of the per-folder layout above:
+  running Chronos on its own repository leaves a real `.chronos` in the project
+  root, holding that developer's plans, run transcripts, logs and schedule.
+  `.chronos/.gitignore` keeps all of it out of git, which is why nothing looked
+  amiss, but the packaging tool reads `.vscodeignore` and does not consult a
+  nested `.gitignore` — so the directory went into the `.vsix` and would have
+  reached every install, 13MB of one machine's private work included. It is now
+  excluded by name. Builds before 0.8.0-rc.24 could not hit this, because there
+  was no `.chronos` directory to sweep up.
 
 ### Changed
 
