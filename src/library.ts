@@ -113,30 +113,33 @@ export function samePath(a: string, b: string, ignoreCase = process.platform ===
 
 export const titleOf = (name: string): string => name.slice(0, -path.extname(name).length);
 
-/** Long enough for a real sentence, short enough not to be truncated twice by
- *  the sidebar's own width. */
-const TASK_LABEL_MAX = 80;
+/** A ceiling on a row that wraps over as many lines as it needs: long enough for
+ *  a real task to show in full, short enough that pasting an essay into a task
+ *  file cannot grow the row without bound. */
+const TASK_LABEL_MAX = 300;
 
 /**
- * How a task file reads as a single tree row: its first non-empty line, stripped
- * of the Markdown marks that make a heading or a bullet, and clipped.
+ * How a task file reads as a tree row: every non-empty line of it, stripped of
+ * the Markdown marks that make a heading or a bullet, and clipped.
  *
  * The file is the task — this only decides how it is displayed, so nothing here
- * is ever written back. A task may grow to several lines once Claude has asked
- * about it, and the row must stay one line regardless.
+ * is ever written back. A task grows extra lines once Claude has asked about it,
+ * and those lines are part of the description, so the row shows them and wraps.
+ * Blank lines are dropped, so paragraph gaps do not pad the row out.
  */
 export function taskLabel(text: string): string {
-  const firstLine = text
+  const joined = text
     .split(/\r?\n/)
     .map((line) => line.replace(/^\s*(?:#{1,6}\s+|[-*+]\s+|\d+\.\s+)?/, '').trim())
-    .find((line) => line !== '');
+    .filter((line) => line !== '')
+    .join('\n');
 
-  if (!firstLine) {
+  if (!joined) {
     return '(empty task)';
   }
-  return firstLine.length > TASK_LABEL_MAX
-    ? `${firstLine.slice(0, TASK_LABEL_MAX - 1).trimEnd()}…`
-    : firstLine;
+  return joined.length > TASK_LABEL_MAX
+    ? `${joined.slice(0, TASK_LABEL_MAX - 1).trimEnd()}…`
+    : joined;
 }
 
 /**

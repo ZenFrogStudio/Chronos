@@ -135,6 +135,20 @@ logic out; one of the moves also narrowed a guard.
 
 ### Changed
 
+- **A task in the sidebar shows in full instead of being cut off mid-sentence.**
+  The row was built from the first non-empty line of the task file and clipped at
+  80 characters, so anything longer than a short sentence ended in an ellipsis
+  and a task you could no longer read was a task you could not act on. The
+  sidebar's CSS was never the cause — the label already wrapped freely; the text
+  was cut on the host side before the webview ever saw it. The cap is now 300
+  characters, which holds a real task whole while still stopping a pasted essay
+  from growing the row without bound, and the row is every non-empty line of the
+  file rather than only the first, because a task grows extra lines once Claude
+  has asked about it and those lines are part of the description. Blank lines are
+  closed up so paragraph gaps do not pad the row out. Where one line is still the
+  right answer — the planning terminal's name, the archive confirmation, the
+  buttons' screen-reader labels — the first line is used.
+
 - **Scheduling and unscheduling are one button, and unscheduling no longer
   throws the run history away.** The plan pane carried two controls for the same
   idea. A three-label toggle said **Schedule**, **Scheduled** or **Paused**

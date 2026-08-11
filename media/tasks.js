@@ -25,6 +25,8 @@
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
   const send = (message) => vscode.postMessage(message);
   const labelOf = (name) => (state.tasks.find((task) => task.name === name) || { label: '' }).label;
+  /** A label is several lines; a button's title or aria-label is one. */
+  const firstLine = (s) => String(s).split('\n')[0];
 
   // ---------- rendering ----------
 
@@ -58,7 +60,7 @@
       ? 'Select a task first'
       : task.generating
         ? 'A planning session is already open for this task'
-        : `Generate a plan from "${task.label}"`;
+        : `Generate a plan from "${firstLine(task.label)}"`;
   }
 
   function taskRow(task) {
@@ -82,11 +84,11 @@
       ${body}
       <span class="task-actions">
         <button class="task-action" type="button" data-action="edit"
-          title="Edit task" aria-label="Edit ${esc(task.label)}">
+          title="Edit task" aria-label="Edit ${esc(firstLine(task.label))}">
           <i class="codicon codicon-pencil"></i>
         </button>
         <button class="task-action is-danger" type="button" data-action="delete"
-          title="Archive task" aria-label="Archive ${esc(task.label)}">
+          title="Archive task" aria-label="Archive ${esc(firstLine(task.label))}">
           <i class="codicon codicon-archive"></i>
         </button>
       </span>
@@ -138,7 +140,10 @@
     if (button.dataset.action === 'delete') {
       send({ type: 'deleteTask', name });
     } else if (button.dataset.action === 'edit') {
-      editing = { name, text: labelOf(name) };
+      // The edit box is a one-line field and Enter rewrites the file with what
+      // is in it, so it is seeded with the first line — as it was before the row
+      // grew to several — rather than with the lines run together.
+      editing = { name, text: firstLine(labelOf(name)) };
       render();
     }
   });
@@ -211,7 +216,7 @@
         break;
       case 'F2':
         if (task) {
-          editing = { name: task.name, text: task.label };
+          editing = { name: task.name, text: firstLine(task.label) };
           render();
         }
         break;

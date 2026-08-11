@@ -222,7 +222,7 @@ export class TaskView implements vscode.WebviewViewProvider, vscode.Disposable {
           return;
         }
         const choice = await vscode.window.showWarningMessage(
-          `Archive "${task.label}"?`,
+          `Archive "${firstLine(task.label)}"?`,
           { modal: true, detail: 'The file moves to .chronos/archive.' },
           'Archive'
         );
@@ -327,7 +327,7 @@ export class TaskView implements vscode.WebviewViewProvider, vscode.Disposable {
     // session. Nothing is running until `sendText` below, so there is no window
     // here in which a plan could land ahead of the entry that would adopt it.
     const terminal = vscode.window.createTerminal({
-      name: `Chronos: plan ${task.label.slice(0, 40)}`,
+      name: `Chronos: plan ${firstLine(task.label).slice(0, 40)}`,
       cwd,
       iconPath: new vscode.ThemeIcon('lightbulb')
     });
@@ -451,6 +451,12 @@ function askForTask(prompt: string, value: string): Thenable<string | undefined>
     placeHolder: 'e.g. Add an interval repeat option to the scheduler',
     validateInput: (input) => (input.trim() ? undefined : 'Describe the task in a line.')
   });
+}
+
+/** The label as a title: the sidebar row is several lines, a terminal name and
+ *  a modal's question are one. */
+function firstLine(label: string): string {
+  return label.split('\n')[0];
 }
 
 function readOrEmpty(filePath: string): string {

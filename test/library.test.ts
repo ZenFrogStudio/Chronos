@@ -196,17 +196,26 @@ describe('taskLabel', () => {
     assert.equal(taskLabel('1. Add interval repeats'), 'Add interval repeats');
   });
 
-  it('should_stay_one_line_once_a_task_has_grown', () => {
-    // A task grows past one line after Claude has asked about it; the row cannot.
+  it('should_keep_every_line_of_a_task_that_has_grown', () => {
+    // A task grows past one line after Claude has asked about it, and those
+    // lines are the description — the row wraps to hold them. The blank line
+    // between the two is dropped.
     const label = taskLabel('Refactor the auth module\n\nContext: it predates SSO.\n');
 
-    assert.equal(label, 'Refactor the auth module');
+    assert.equal(label, 'Refactor the auth module\nContext: it predates SSO.');
+  });
+
+  it('should_strip_the_marks_on_every_line_not_just_the_first', () => {
+    assert.equal(
+      taskLabel('# Refactor auth\n- check SSO\n- check tokens'),
+      'Refactor auth\ncheck SSO\ncheck tokens'
+    );
   });
 
   it('should_clip_a_task_too_long_for_a_row', () => {
     const label = taskLabel('a'.repeat(500));
 
-    assert.ok(label.length <= 80, 'the sidebar would truncate it a second time');
+    assert.ok(label.length <= 300, 'a pasted essay must not grow the row without bound');
     assert.ok(label.endsWith('…'), 'clipping must be visible, not silent');
   });
 
