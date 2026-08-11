@@ -30,11 +30,11 @@ const stepFinish = (part: Record<string, unknown> = {}) =>
 
 const textEvent = (text: string) => opencodeEvent('text', { type: 'text', text });
 
-const errorEvent = (message: string) =>
+const errorEvent = (message: string, statusCode?: number) =>
   JSON.stringify({
     type: 'error',
     sessionID: 'ses_1',
-    error: { name: 'UnknownError', data: { message } }
+    error: { name: 'UnknownError', data: { message, statusCode } }
   });
 
 /**
@@ -319,6 +319,25 @@ describe('resolveOutcome — opencode runs', () => {
 
     assert.equal(outcome.authFailure, true);
     assert.match(outcome.error ?? '', /the opencode CLI rejected your credentials/);
+  });
+
+  it('should_detect_an_opencode_auth_failure_from_its_status_code', () => {
+    // The message opencode actually emits on a rejected login — observed
+    // against 1.18.5 — says neither "unauthorized" nor "not logged in", so
+    // every text pattern misses it and the status code is the only thing that
+    // identifies it. Without this the run is filed as retryable, and an expired
+    // login gets three retries an hour apart instead of being reported.
+    const outcome = resolveOutcome({
+      exitCode: 1,
+      summary: summarise(
+        errorEvent('Upstream request failed: [401] Provider returned error', 401),
+        'opencode'
+      ),
+      engine: 'opencode'
+    });
+
+    assert.equal(outcome.authFailure, true);
+    assert.equal(outcome.retryable, false);
   });
 });
 

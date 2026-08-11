@@ -55,6 +55,12 @@ describe('settingGroups', () => {
     assert.equal(fieldFor('logRetentionDays').label, 'Log retention days');
   });
 
+  it('should_label_a_dotted_key_without_the_dot', () => {
+    // The closing-step toggles are grouped under one key prefix; the dot is
+    // structure in settings.json, not something to read on a page.
+    assert.equal(fieldFor('planStep.changelog').label, 'Plan step changelog');
+  });
+
   it('should_offer_the_account_default_first_for_the_plan_model', () => {
     // Empty means "pass no --model at all", which is the right answer until you
     // have a reason — so it has to be the one you land on.

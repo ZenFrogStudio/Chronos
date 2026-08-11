@@ -112,6 +112,32 @@ function quote(shell: Shell, value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
+/** A step a generated plan is asked to end with, and whether it is on by default. */
+export type PlanStepId = 'tests' | 'version' | 'changelog' | 'rebuild' | 'commit';
+
+/**
+ * Order matters and is fixed here rather than taken from the caller: verify,
+ * then record, then build, then commit. Each phrase completes "a closing step
+ * that ...", and every one of them is ASCII with no shell metacharacter,
+ * because the whole instruction is one argument typed into a live shell.
+ */
+export const PLAN_STEPS: readonly { id: PlanStepId; phrase: string; onByDefault: boolean }[] = [
+  { id: 'tests', phrase: 'runs the project test suite and gets it passing', onByDefault: false },
+  { id: 'version', phrase: 'bumps the project version', onByDefault: true },
+  { id: 'changelog', phrase: 'adds a matching changelog entry', onByDefault: true },
+  { id: 'rebuild', phrase: 'rebuilds the project', onByDefault: false },
+  { id: 'commit', phrase: 'commits the result to git', onByDefault: true }
+];
+
+/** The enabled steps, in table order, read through a settings getter. */
+export function enabledPlanSteps(
+  read: (key: string, fallback: boolean) => boolean
+): PlanStepId[] {
+  return PLAN_STEPS.filter((step) => read(`planStep.${step.id}`, step.onByDefault)).map(
+    (step) => step.id
+  );
+}
+
 export interface GenerateOptions {
   exe: string;
   /** The file Claude reads the request from — a library plan, or a sidebar task. */
@@ -129,6 +155,37 @@ export interface GenerateOptions {
   allowDir: string;
   model?: string;
   shell: Shell;
+  /**
+   * The steps the plan should end with. Omitted or empty means no closing
+   * sentence at all, which is what every toggle being off means.
+   */
+  steps?: PlanStepId[];
+}
+
+/**
+ * The sentence appended to the instruction, or '' when nothing is enabled.
+ *
+ * The last clause is not padding: the planning session itself runs in plan mode,
+ * and without it the session bumps the version and commits during planning
+ * instead of writing the step into the plan it is meant to produce.
+ */
+function closingSentence(steps: PlanStepId[]): string {
+  // Filtered against the table rather than mapped over the argument, so the
+  // order the caller happened to pass them in cannot leak into the sentence.
+  const phrases = PLAN_STEPS.filter((step) => steps.includes(step.id)).map((step) => step.phrase);
+  if (!phrases.length) {
+    return '';
+  }
+
+  const list =
+    phrases.length === 1
+      ? phrases[0]
+      : `${phrases.slice(0, -1).join(', ')} and ${phrases[phrases.length - 1]}`;
+
+  return (
+    ` Finish the plan with a closing step that ${list}. ` +
+    'This step belongs in the plan you write, not something you do now.'
+  );
 }
 
 /**
@@ -143,7 +200,7 @@ export interface GenerateOptions {
  * writes a plan, it does not carry one out.
  */
 export function generateCommand(options: GenerateOptions): string {
-  const { exe, sourcePath, destDir, allowDir, model, shell } = options;
+  const { exe, sourcePath, destDir, allowDir, model, shell, steps = [] } = options;
   const q = (value: string) => quote(shell, value);
 
   // No `!`, `$`, backtick or quote of its own: interactive bash expands `!` and
@@ -163,7 +220,8 @@ export function generateCommand(options: GenerateOptions): string {
     `Ask me anything you need to first. When I approve the plan, ${destination}, ` +
     'written as instructions for an agent that will carry it out later with ' +
     'nobody watching, and change nothing else.' +
-    (destDir ? naming : '');
+    (destDir ? naming : '') +
+    closingSentence(steps);
 
   // PowerShell reads a quoted string at the start of a line as a value, not a
   // command; & is what makes it run.

@@ -89,9 +89,10 @@
   let customModel = false;
   /** Whether the When field's popover is showing. */
   let pickerOpen = false;
-  /** Day 1 of the month the popover is looking at. Null means "wherever the
-   *  scheduled time is" — browsing away from it is what sets this. */
-  let pickerMonth = /** @type {Date|null} */ (null);
+  /** The day the popover is sitting on — its highlight, and the month it draws.
+   *  One variable rather than two, so the highlight can never be on a month you
+   *  are not looking at. Null whenever the popover is closed. */
+  let pickerFocus = /** @type {Date|null} */ (null);
 
   /** A dragged size must never leave the other pane unusable, and the window can
    *  shrink after the drag — so every read goes back through these. */
@@ -153,10 +154,16 @@
   const localStr = (year, month, day, hour24, minute) =>
     `${year}-${pad(month + 1)}-${pad(day)}T${pad(hour24)}:${pad(minute)}`;
 
-  /** Day 1 of the month an instant falls in — what the grid is drawn from. */
-  function monthOf(iso) {
-    const d = new Date(iso);
-    return new Date(d.getFullYear(), d.getMonth(), 1);
+  /** Another day, same clock. Midnight-based, so a DST boundary cannot shift it. */
+  const addDays = (date, step) =>
+    new Date(date.getFullYear(), date.getMonth(), date.getDate() + step);
+
+  /** The same day in another month, clamped to that month's length — stepping
+   *  back from the 31st lands on the 30th rather than overflowing into May. */
+  function addMonths(date, step) {
+    const month = date.getMonth() + step;
+    const last = new Date(date.getFullYear(), month + 1, 0).getDate();
+    return new Date(date.getFullYear(), month, Math.min(date.getDate(), last));
   }
 
   /**
@@ -323,6 +330,13 @@
     return `<svg class="ring" viewBox="0 0 40 40" aria-hidden="true">${track}${inner}</svg>`;
   }
 
+  /** The title's own "working now" marker. The ring beside it belongs to the
+   *  clock; this belongs to the run. Decorative — `headStatus` already says
+   *  "running now" in text, so screen readers are covered. */
+  const runSpinner = () =>
+    '<i class="codicon codicon-loading codicon-modifier-spin head-spinner" ' +
+    'title="A run is in progress" aria-hidden="true"></i>';
+
   // ---------- render ----------
 
   /**
@@ -420,19 +434,26 @@
       .sort((a, b) => recencyOf(b).localeCompare(recencyOf(a)))[0];
   }
 
-  function renderList() {
+  /**
+   * The plans on screen. Both the list and the arrow keys read this, because
+   * arrowing must walk the list you can actually see rather than `state.plans`.
+   *
+   * Nothing to hide here any more. A one-shot that completed has had its file
+   * moved to `.chronos/archive/plans`, so it is not in `state.plans` at all —
+   * a failed one is, and stays visible, because it is still there to be fixed
+   * and run again. Its runs stay under Runs either way.
+   */
+  function visiblePlans() {
     const term = searchEl.value.trim().toLowerCase();
-    const match = (p) => !term || p.title.toLowerCase().includes(term);
+    return term ? state.plans.filter((p) => p.title.toLowerCase().includes(term)) : state.plans;
+  }
 
-    // Nothing to hide here any more. A one-shot that completed has had its file
-    // moved to `.chronos/archive/plans`, so it is not in `state.plans` at all —
-    // a failed one is, and stays visible, because it is still there to be fixed
-    // and run again. Its runs stay under Runs either way.
-    const plans = state.plans.filter(match);
+  function renderList() {
+    const plans = visiblePlans();
 
     if (!plans.length) {
       listEl.innerHTML = `<p class="empty">${
-        term ? 'No plans match.' : 'No plans yet.<br />Create one to get started.'
+        searchEl.value.trim() ? 'No plans match.' : 'No plans yet.<br />Create one to get started.'
       }</p>`;
       return;
     }
@@ -486,11 +507,8 @@
         ? ' title="Missed an occurrence — run it now, or skip it, under Runs"'
         : '';
 
-    const classes = [
-      'plan-item',
-      plan.name === selected ? 'is-selected' : '',
-      isRunning(series) ? 'is-running' : ''
-    ].join(' ');
+    const on = plan.name === selected;
+    const classes = ['plan-item', on ? 'is-selected' : '', isRunning(series) ? 'is-running' : ''].join(' ');
 
     const actions = `<span class="plan-actions">
         <button class="plan-action" type="button" data-action="rename"
@@ -503,9 +521,22 @@
 
     // A row is a wrapper holding several buttons rather than one button, because
     // a button cannot be nested inside a button.
+    //
+    // Roving tabindex: only the selected row is in the tab order, so Tab crosses
+    // the library once and the arrows move within it — the same pattern as the
+    // task sidebar. No role="listbox" / role="option" here, though, which is the
+    // one place this list deliberately diverges from tasks.js: those rows are
+    // flat, where each of these sits beside a rename and an archive button, and
+    // a listbox whose options are interleaved with plain buttons is a worse lie
+    // than a list of buttons.
+    //
+    // The selected row's focus key is a constant rather than its name, so focus
+    // follows the selection through the innerHTML rebuild with no focus code of
+    // its own. Keyed by name it would be restored to the row you just left.
     return `<div class="plan-row">
-      <button class="${classes}" type="button"
-        data-action="select" data-name="${esc(plan.name)}" data-focus-key="plan-${esc(plan.name)}">
+      <button class="${classes}" type="button" tabindex="${on ? 0 : -1}" ${on ? 'aria-current="true"' : ''}
+        data-action="select" data-name="${esc(plan.name)}"
+        data-focus-key="${on ? 'plan-selected' : `plan-${esc(plan.name)}`}">
         <span class="plan-name">${esc(plan.title)}</span>
         <span class="plan-meta ${metaClass}"${missedTitle}>${esc(meta)}</span>
       </button>
@@ -538,6 +569,7 @@
         <div class="head-text">
           <div class="head-title-row">
             <h2 class="detail-title">${esc(plan.title)}</h2>
+            ${isRunning(series) ? runSpinner() : ''}
           </div>
           ${headStatus(series)}
           <p class="detail-path">${esc(plan.filePath)}</p>
@@ -570,6 +602,7 @@
         </div>
       </div>
       ${(state.settings || []).map(settingGroup).join('')}
+      ${shortcutsSection()}
       <div class="actions">
         <button class="link-button" type="button" data-action="native-settings">Edit in VS Code Settings ↗</button>
       </div>`;
@@ -741,7 +774,9 @@
 
   function pickerPopover(s) {
     const at = new Date(s.nextRunAt);
-    const view = pickerMonth || monthOf(s.nextRunAt);
+    // The month on screen is derived from the day the calendar is sitting on,
+    // never held separately.
+    const view = pickerFocus || at;
     const today = new Date();
 
     // A blank leading cell is a bare span: the grid gives it its column, and it
@@ -758,7 +793,12 @@
           dayDiff(cell, today) === 0 ? 'is-today' : '',
           dayDiff(cell, at) === 0 ? 'is-selected' : ''
         ].join(' ');
+        // Roving tabindex again: one tabbable day, and the focus key is what
+        // carries real focus onto the newly highlighted day after each arrow
+        // press. The scheduled day keeps its sodium fill; this is the ring.
+        const on = dayDiff(cell, view) === 0;
         return `<button class="${classes}" type="button" data-action="picker-day"
+          tabindex="${on ? 0 : -1}" ${on ? 'data-focus-key="picker-day"' : ''}
           data-date="${view.getFullYear()}-${pad(view.getMonth() + 1)}-${pad(day)}">${day}</button>`;
       })
       .join('');
@@ -1282,6 +1322,16 @@
     saveViewState();
   });
 
+  /**
+   * The one branch behind both the Schedule button and the library's `S`. With
+   * nothing scheduled this is what creates it; resuming a spent one-shot has to
+   * clear `spent`, or it will never fire.
+   */
+  function toggleSchedule(plan, series) {
+    if (!series) return send({ type: 'schedulePlan', name: plan.name });
+    return patch(series.id, series.enabled ? { enabled: false } : { enabled: true, spent: false });
+  }
+
   detailEl.addEventListener('click', (e) => {
     const el = /** @type {HTMLElement} */ (e.target).closest('[data-action]');
     if (!el) return;
@@ -1298,11 +1348,7 @@
 
     if (action === 'open-editor') return send({ type: 'openInEditor', name: plan.name });
     // Before the `!series` guard: with nothing scheduled, this is what creates it.
-    // Resuming a spent one-shot has to clear `spent`, or it will never fire.
-    if (action === 'schedule-toggle') {
-      if (!series) return send({ type: 'schedulePlan', name: plan.name });
-      return patch(series.id, series.enabled ? { enabled: false } : { enabled: true, spent: false });
-    }
+    if (action === 'schedule-toggle') return toggleSchedule(plan, series);
 
     if (runAction(action, runId, series)) return;
     if (!series) return;
@@ -1312,16 +1358,20 @@
 
     if (action === 'picker-toggle') {
       pickerOpen = !pickerOpen;
-      if (pickerOpen) pickerMonth = monthOf(series.nextRunAt);
-      return render();
+      pickerFocus = pickerOpen ? new Date(series.nextRunAt) : null;
+      render();
+      // Arrow-ready however it was opened. Harmless for a mouse click:
+      // :focus-visible draws no ring for one.
+      if (pickerOpen) focusKey('picker-day');
+      return;
     }
 
-    // Browsing months moves the view only. Nothing is scheduled until a day is
-    // clicked, so paging back through last year must not patch anything.
+    // Browsing months carries the highlight with it, so what the arrows move
+    // next is always on the month you are looking at. Nothing is scheduled until
+    // a day is clicked or Enter is pressed, so paging back through last year
+    // still patches nothing.
     if (action === 'picker-prev' || action === 'picker-next') {
-      const view = pickerMonth || monthOf(series.nextRunAt);
-      const step = action === 'picker-next' ? 1 : -1;
-      pickerMonth = new Date(view.getFullYear(), view.getMonth() + step, 1);
+      pickerFocus = addMonths(pickerFocus || new Date(series.nextRunAt), action === 'picker-next' ? 1 : -1);
       return render();
     }
 
@@ -1454,14 +1504,280 @@
   document.addEventListener('click', (e) => {
     if (!pickerOpen) return;
     if (/** @type {HTMLElement} */ (e.target).closest('.when-picker')) return;
+    closePicker();
+    render();
+  });
+
+  // ---------- keyboard ----------
+
+  /**
+   * The manager's keyboard map. One table, read by two things: the handlers
+   * below implement it, and the Settings page prints it — so a key that moves
+   * and a row that never says so cannot drift apart.
+   */
+  const SHORTCUTS = [
+    { keys: ['↑', '↓'], where: 'Plan library', what: 'Move through plans; the plan you land on opens' },
+    { keys: ['Home', 'End'], where: 'Plan library', what: 'First / last plan' },
+    { keys: ['Enter'], where: 'Plan library', what: 'Step into the plan’s text' },
+    { keys: ['S'], where: 'Plan library', what: 'Schedule, or pause a scheduled plan' },
+    { keys: ['R'], where: 'Plan library', what: 'Run now' },
+    { keys: ['D'], where: 'Plan library', what: 'Open the When calendar' },
+    { keys: ['/'], where: 'Anywhere', what: 'Jump to the search box' },
+    { keys: ['↓'], where: 'Search box', what: 'Drop into the filtered list' },
+    { keys: ['F6', 'Shift+F6'], where: 'Anywhere', what: 'Move between library, plan and Runs' },
+    { keys: ['↑', '↓', '←', '→'], where: 'When calendar', what: 'Move a day, or a week' },
+    { keys: ['PageUp', 'PageDown'], where: 'When calendar', what: 'Previous / next month' },
+    { keys: ['Enter'], where: 'When calendar', what: 'Set this date' },
+    { keys: ['Esc'], where: 'When calendar / search', what: 'Close, change nothing, go back to the list' }
+  ];
+
+  /**
+   * That table, on the Settings page. Static markup rather than a setting: it
+   * goes nowhere near src/settings.ts, which builds its groups from
+   * package.json's configuration schema and would have to invent a fake setting
+   * to carry a table of keys.
+   */
+  function shortcutsSection() {
+    const row = (s) => `
+      <div class="shortcut-keys">${s.keys.map((k) => `<kbd>${esc(k)}</kbd>`).join('')}</div>
+      <div>${esc(s.what)} <span class="shortcut-where">— ${esc(s.where)}</span></div>`;
+
+    return `<div class="section">
+      <h3 class="section-title">Keyboard shortcuts</h3>
+      <div class="settings shortcuts">${SHORTCUTS.map(row).join('')}</div>
+    </div>`;
+  }
+
+  /** Where a keystroke means text rather than a command. */
+  const isTyping = (el) =>
+    !!el &&
+    (el.tagName === 'INPUT' ||
+      el.tagName === 'TEXTAREA' ||
+      el.tagName === 'SELECT' ||
+      el.isContentEditable);
+
+  /** Focus whatever carries a focus key, if it is on screen. */
+  function focusKey(key) {
+    const el = /** @type {HTMLElement|null} */ (document.querySelector(`[data-focus-key="${key}"]`));
+    if (el) el.focus();
+  }
+
+  /** Library, plan, Runs — the three panes F6 walks between. */
+  const PANES = [listEl, detailEl, activityListEl];
+  const FOCUSABLE = 'a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])';
+
+  /** Focus a pane's first focusable element, or the pane itself when it holds
+   *  none — which is why #detail and #activity-list carry tabindex="-1". */
+  function focusPane(index) {
+    const pane = PANES[(index + PANES.length) % PANES.length];
+    // Where a pane has an obvious landing place, take that instead of whatever
+    // happens to come first: the selected plan rather than the top row, the
+    // plan's text rather than the link above it. Only one of the two keys is
+    // ever inside a given pane.
+    const target =
+      pane.querySelector('[data-focus-key="plan-selected"], [data-focus-key="editor"]') ||
+      pane.querySelector(FOCUSABLE) ||
+      pane;
+    /** @type {HTMLElement} */ (target).focus();
+  }
+
+  /** Which pane holds focus now, so F6 steps from where you are. */
+  const paneOf = (el) => PANES.findIndex((pane) => pane.contains(el));
+
+  /** Closing changes nothing — that is the whole point of the highlight. */
+  function closePicker() {
     pickerOpen = false;
+    pickerFocus = null;
+  }
+
+  /**
+   * The plan library. Modelled on the task sidebar: every move is
+   * `selectPlan(...)`, and render is what moves focus and scrolls, so highlight,
+   * focus and scroll stay one path. Selection follows focus, which costs one
+   * `loadPlan` per row passed through — a small file read on the host, and
+   * exactly what clicking already does.
+   */
+  listEl.addEventListener('keydown', (e) => {
+    // Tab reaches the row's own rename and archive buttons, and Enter there must
+    // press the button rather than mean the list's Enter.
+    if (/** @type {HTMLElement} */ (e.target).closest('.plan-actions')) return;
+    // Unmodified keys only, so Ctrl+S stays the editor's save.
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+    const plans = visiblePlans();
+    const index = plans.findIndex((p) => p.name === selected);
+    const plan = index === -1 ? null : plans[index];
+    const series = seriesForPlan(plan);
+
+    // Clamped rather than wrapped: the ends of the library are landmarks.
+    const moveSelection = (i) => {
+      const next = plans[Math.max(0, Math.min(i, plans.length - 1))];
+      if (!next || next.name === selected) return;
+      saveNow();
+      selectPlan(next.name);
+    };
+
+    let handled = true;
+    switch (e.key) {
+      case 'ArrowDown':
+        moveSelection(index + 1);
+        break;
+      case 'ArrowUp':
+        moveSelection(index - 1);
+        break;
+      case 'Home':
+        moveSelection(0);
+        break;
+      case 'End':
+        moveSelection(plans.length - 1);
+        break;
+      case 'Enter':
+        focusPane(1);
+        break;
+      case 's':
+      case 'S':
+        if (plan) toggleSchedule(plan, series);
+        break;
+      case 'r':
+      case 'R':
+        // A no-op on an unscheduled plan: there is no series to run.
+        runAction('run-now', undefined, series);
+        break;
+      case 'd':
+      case 'D':
+        if (series) {
+          // Leaves the Settings page for the same reason clicking a plan does:
+          // the calendar is in the detail pane, and there is nothing to open on
+          // a page that is not showing the plan.
+          showSettings = false;
+          pickerOpen = true;
+          pickerFocus = new Date(series.nextRunAt);
+          render();
+          focusKey('picker-day');
+        }
+        break;
+      default:
+        handled = false;
+    }
+
+    // Or the library scrolls out from under the selection.
+    if (handled) e.preventDefault();
+  });
+
+  searchEl.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown') {
+      const first = visiblePlans()[0];
+      if (!first) return;
+      e.preventDefault();
+      if (first.name !== selected) {
+        saveNow();
+        selectPlan(first.name);
+      }
+      focusPane(0);
+      return;
+    }
+
+    // The term stays: this is a way back to the list, not a way to clear it.
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      focusPane(0);
+    }
+  });
+
+  /**
+   * The When calendar. Arrows move the highlight and nothing else — no message
+   * reaches the host until Enter, which is what makes browsing to a date safe.
+   * Delegated from the detail pane, which rebuilds the popover on every patch.
+   */
+  detailEl.addEventListener('keydown', (e) => {
+    const el = /** @type {HTMLElement} */ (e.target);
+    if (!pickerOpen || !el.closest('.picker-popover')) return;
+    // The hour, minute and AM/PM dropdowns are native controls that already work
+    // from the keyboard. Arrows there change the time, not the day.
+    if (el.closest('.picker-time')) return;
+
+    const series = seriesForPlan(planByName(selected));
+    if (!series) return;
+    const view = pickerFocus || new Date(series.nextRunAt);
+
+    if (e.key === 'Enter') {
+      // The highlighted day, at whatever time of day the series already runs —
+      // the identical commit clicking a day makes.
+      e.preventDefault();
+      const at = new Date(series.nextRunAt);
+      const local = localStr(view.getFullYear(), view.getMonth(), view.getDate(), at.getHours(), at.getMinutes());
+      closePicker();
+      patch(series.id, whenPatch(series, toUtcIso(local)));
+      // Closed now rather than when the host's new state lands, so the popover
+      // never lingers over a date it no longer holds.
+      render();
+      return focusKey('when');
+    }
+
+    let next = null;
+    switch (e.key) {
+      case 'ArrowLeft':
+        next = addDays(view, -1);
+        break;
+      case 'ArrowRight':
+        next = addDays(view, 1);
+        break;
+      case 'ArrowUp':
+        next = addDays(view, -7);
+        break;
+      case 'ArrowDown':
+        next = addDays(view, 7);
+        break;
+      case 'PageUp':
+        next = addMonths(view, -1);
+        break;
+      case 'PageDown':
+        next = addMonths(view, 1);
+        break;
+      case 'Home':
+        next = new Date(view.getFullYear(), view.getMonth(), 1);
+        break;
+      case 'End':
+        next = new Date(view.getFullYear(), view.getMonth() + 1, 0);
+        break;
+      default:
+        return;
+    }
+
+    e.preventDefault();
+    pickerFocus = next;
     render();
   });
 
   document.addEventListener('keydown', (e) => {
-    if (e.key !== 'Escape' || !pickerOpen) return;
-    pickerOpen = false;
-    render();
+    const target = /** @type {HTMLElement} */ (e.target);
+
+    // Escape is the one key that means something while you are typing.
+    if (e.key === 'Escape') {
+      if (!pickerOpen) return;
+      closePicker();
+      render();
+      focusKey('when');
+      e.preventDefault();
+      return;
+    }
+
+    // Everything else here is a command, and a command must never swallow a
+    // keystroke meant for the plan text or a settings field.
+    if (isTyping(target)) return;
+
+    if (e.key === '/') {
+      searchEl.focus();
+      searchEl.select();
+      e.preventDefault();
+      return;
+    }
+
+    if (e.key === 'F6') {
+      const from = paneOf(target);
+      focusPane((from === -1 ? 0 : from) + (e.shiftKey ? -1 : 1));
+      e.preventDefault();
+    }
   });
 
   /**
@@ -1565,8 +1881,7 @@
   function selectPlan(name) {
     if (name !== selected) {
       customModel = false;
-      pickerOpen = false;
-      pickerMonth = null;
+      closePicker();
     }
     showSettings = false;
     selected = name;

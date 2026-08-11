@@ -13,8 +13,9 @@ import { describe, it } from 'node:test';
  * back. Reading the source can.
  */
 
-const SRC = path.resolve(__dirname, '..', '..', 'src');
-const MEDIA = path.resolve(__dirname, '..', '..', 'media');
+const ROOT = path.resolve(__dirname, '..', '..');
+const SRC = path.join(ROOT, 'src');
+const MEDIA = path.join(ROOT, 'media');
 
 function sourceFiles(dir: string): string[] {
   return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
@@ -101,11 +102,18 @@ describe('source guards', () => {
     }
 
     const css = fs.readFileSync(path.join(MEDIA, 'codicon.css'), 'utf8');
-    const html = fs.readFileSync(path.join(MEDIA, 'manager.html'), 'utf8');
+    // Both files, as with the task view: the footer buttons are in the HTML,
+    // while the plan rows, the calendar and the run spinner are built in JS.
+    const markup = ['manager.html', 'manager.js']
+      .map((file) => fs.readFileSync(path.join(MEDIA, file), 'utf8'))
+      .join('\n');
 
     // Codicon names change between releases, and a renamed one is invisible in
-    // the same way — a blank glyph, no error.
-    for (const name of html.match(/codicon-[\w-]+/g) ?? []) {
+    // the same way — a blank glyph, no error. `codicon-modifier-*` is skipped:
+    // those are behaviour classes like the spin animation, with no glyph and so
+    // no `:before` rule of their own.
+    for (const name of markup.match(/codicon-[\w-]+/g) ?? []) {
+      if (name.startsWith('codicon-modifier-')) continue;
       assert.ok(css.includes(`.${name}:before`), `${name} is not in media/codicon.css`);
     }
   });
@@ -126,6 +134,85 @@ describe('source guards', () => {
     // Both sides matching `undefined` would pass the two above vacuously.
     assert.equal(constant('LIBRARY_DEFAULT'), '260');
     assert.equal(constant('ACTIVITY_DEFAULT'), '220');
+  });
+
+  it('should_keep_a_script_that_installs_the_build_into_vs_code', () => {
+    // `package` stops at a .vsix on disk. With no step past it, a run that edits
+    // this extension can typecheck, test, compile and package, and the editor
+    // carries on running whatever it loaded at startup — completed work that
+    // looks like it did nothing. Lose this script and that returns silently.
+    const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+
+    assert.ok(fs.existsSync(path.join(ROOT, 'reinstall.js')), 'reinstall.js is missing');
+    assert.match(manifest.scripts.reinstall ?? '', /node reinstall\.js/);
+  });
+
+  it('should_never_name_the_install_script_after_an_npm_lifecycle_hook', () => {
+    // npm runs `install`, `preinstall` and `postinstall` itself during
+    // `npm install`. Renaming `reinstall` to the obvious `install` would package
+    // the extension and push it into VS Code every time a dependency was added.
+    const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+
+    for (const hook of ['install', 'preinstall', 'postinstall']) {
+      assert.ok(!(hook in manifest.scripts), `"${hook}" is an npm lifecycle hook — use "reinstall"`);
+    }
+  });
+
+  it('should_name_the_vsix_from_the_manifest_rather_than_a_literal', () => {
+    // The filename carries the version, so a hardcoded one installs an older
+    // .vsix still sitting in the folder — the exact staleness this script is
+    // here to prevent, and invisible, because the install still reports success.
+    const script = fs.readFileSync(path.join(ROOT, 'reinstall.js'), 'utf8');
+
+    assert.ok(script.includes('package.json'), 'reinstall.js must read the version');
+    assert.doesNotMatch(script, /chronos-\d+\.\d+\.\d+/, 'reinstall.js hardcodes a version');
+  });
+
+  it('should_install_into_the_editor_this_project_is_developed_in', () => {
+    // VSCodium and Microsoft's build keep separate extension folders, and the
+    // `code` CLI on PATH is the latter. Installing with it succeeds, says so,
+    // and leaves VSCodium on the version it already had — which is how a whole
+    // evening of finished work stayed invisible. Drop codium from the list and
+    // that returns, still reporting success.
+    const script = fs.readFileSync(path.join(ROOT, 'reinstall.js'), 'utf8');
+
+    assert.match(script, /'codium'/, 'reinstall.js must try the codium CLI');
+  });
+
+  it('should_wire_every_key_the_manager_documents', () => {
+    // The manager's key map is written twice by necessity: once as the handlers
+    // that implement it, once as the table the Settings page prints. There is no
+    // DOM harness here to press a key in, so this reads both sides instead —
+    // otherwise the table can silently drop off the page while the keys keep
+    // working, or outlive a key that no longer does anything.
+    const js = fs.readFileSync(path.join(MEDIA, 'manager.js'), 'utf8');
+
+    const keys = [
+      'ArrowUp',
+      'ArrowDown',
+      'ArrowLeft',
+      'ArrowRight',
+      'Home',
+      'End',
+      'PageUp',
+      'PageDown',
+      'Enter',
+      'Escape',
+      'F6'
+    ];
+    for (const key of keys) {
+      assert.ok(js.includes(`'${key}'`), `media/manager.js never handles ${key}`);
+    }
+
+    assert.match(js, /const SHORTCUTS = \[/, 'media/manager.js has no SHORTCUTS table');
+
+    // The call site, not merely the definition: a table nothing renders is the
+    // half of this the key names above cannot catch.
+    const page = js.slice(js.indexOf('function settingsPage()'));
+    assert.ok(
+      page.slice(0, page.indexOf('\n  }')).includes('${shortcutsSection()}'),
+      'settingsPage never renders the shortcuts table'
+    );
   });
 
   it('should_ship_a_sash_element_for_every_sash_rule', () => {

@@ -37,7 +37,17 @@ const PREFIX = 'chronos.';
  * is a judgement `package.json` has nowhere to record.
  */
 const GROUPS: { title: string; keys: string[] }[] = [
-  { title: 'Planning', keys: ['planModel'] },
+  {
+    title: 'Planning',
+    keys: [
+      'planModel',
+      'planStep.tests',
+      'planStep.version',
+      'planStep.changelog',
+      'planStep.rebuild',
+      'planStep.commit'
+    ]
+  },
   { title: 'Engines', keys: ['claudePath', 'opencodePath'] },
   { title: 'Locations', keys: ['libraryPath', 'resultsPath'] },
   {
@@ -114,10 +124,11 @@ function toField(key: string, prop: any): SettingField {
   return field;
 }
 
-/** `showTerminalOnRun` → `Show terminal on run`. Derived rather than listed, so
- *  a label cannot drift from the key it belongs to. */
+/** `showTerminalOnRun` → `Show terminal on run`, `planStep.tests` → `Plan step
+ *  tests`. Derived rather than listed, so a label cannot drift from the key it
+ *  belongs to. */
 function labelFor(key: string): string {
-  const words = key.replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase();
+  const words = key.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/\./g, ' ').toLowerCase();
   return words.charAt(0).toUpperCase() + words.slice(1);
 }
 

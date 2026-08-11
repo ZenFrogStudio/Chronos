@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { buildArgs, generateCommand, preflightError, shellKind, Shell } from '../src/launch';
+import {
+  buildArgs,
+  enabledPlanSteps,
+  generateCommand,
+  preflightError,
+  shellKind,
+  Shell
+} from '../src/launch';
 import { AgentId, PermissionMode } from '../src/types';
 
 const PLAN = 'D:\\plans\\refactor.md';
@@ -186,11 +193,65 @@ describe('generateCommand', () => {
     assert.ok(!command.includes('Name that file'));
   });
 
+  it('should_ask_for_the_closing_step_when_steps_are_enabled', () => {
+    // Without it an overnight run leaves the repo with new behaviour, no version
+    // bump, no changelog entry and nothing committed.
+    const command = generateCommand(
+      generatable({ steps: ['version', 'changelog', 'commit'] })
+    );
+
+    assert.ok(
+      command.includes(
+        'Finish the plan with a closing step that bumps the project version, ' +
+          'adds a matching changelog entry and commits the result to git.'
+      )
+    );
+  });
+
+  it('should_list_only_the_enabled_steps', () => {
+    const command = generateCommand(generatable({ steps: ['commit'] }));
+
+    assert.ok(command.includes('commits the result to git'));
+    assert.ok(!command.includes('changelog'), 'a switched-off step must not be asked for');
+  });
+
+  it('should_keep_the_steps_in_a_fixed_order_whatever_order_they_arrive_in', () => {
+    // The order is the table's, not the caller's: record before commit, so the
+    // commit picks up the version bump.
+    const command = generateCommand(generatable({ steps: ['commit', 'version'] }));
+
+    assert.ok(command.indexOf('bumps the project version') < command.indexOf('commits the result'));
+  });
+
+  it('should_omit_the_closing_sentence_when_every_step_is_off', () => {
+    for (const steps of [[], undefined]) {
+      const command = generateCommand(generatable({ steps }));
+
+      assert.ok(!command.includes('Finish the plan'), `steps: ${JSON.stringify(steps)}`);
+    }
+  });
+
+  it('should_tell_the_planner_the_closing_step_belongs_in_the_plan', () => {
+    // The planning session runs in plan mode. Without this clause it bumps the
+    // version and commits during planning instead of writing the step down.
+    const command = generateCommand(generatable({ steps: ['commit'] }));
+
+    assert.ok(command.includes('belongs in the plan you write, not something you do now'));
+  });
+
   it('should_keep_the_instruction_free_of_shell_metacharacters', () => {
     // The instruction is one quoted argument typed into a live shell prompt:
     // interactive bash expands `!`, PowerShell expands `$`, and both run a
-    // backtick or quote. Nothing here may be any of those.
-    const command = generateCommand(generatable({ sourcePath: TASK, destDir: STAGING }));
+    // backtick or quote. Nothing here may be any of those — which is why every
+    // closing step is switched on here: a phrase carrying an apostrophe or an em
+    // dash cannot reach the table without failing this.
+    const command = generateCommand(
+      generatable({
+        sourcePath: TASK,
+        destDir: STAGING,
+        steps: ['tests', 'version', 'changelog', 'rebuild', 'commit']
+      })
+    );
 
     assert.ok(!command.includes('`'), 'a backtick would run a command');
     assert.ok(!command.includes('$'), 'PowerShell would expand it');
@@ -268,6 +329,45 @@ describe('generateCommand', () => {
     );
 
     assert.ok(command.includes(`--add-dir 'C:\\o''brien'`));
+  });
+});
+
+describe('enabledPlanSteps', () => {
+  it('should_default_to_version_changelog_and_commit', () => {
+    // What a fresh install does: record what changed and commit it, without
+    // spending an unattended run on a test suite or a build nobody asked for.
+    const steps = enabledPlanSteps((_key, fallback) => fallback);
+
+    assert.deepEqual(steps, ['version', 'changelog', 'commit']);
+  });
+
+  it('should_include_the_opt_in_steps_when_they_are_switched_on', () => {
+    const steps = enabledPlanSteps(() => true);
+
+    assert.deepEqual(steps, ['tests', 'version', 'changelog', 'rebuild', 'commit']);
+  });
+
+  it('should_return_nothing_when_every_step_is_switched_off', () => {
+    assert.deepEqual(enabledPlanSteps(() => false), []);
+  });
+
+  it('should_read_each_step_under_its_own_settings_key', () => {
+    // Catches a key renamed in package.json but not here, which would silently
+    // fall back to the default and ignore what the user actually chose.
+    const asked: string[] = [];
+
+    enabledPlanSteps((key, fallback) => {
+      asked.push(key);
+      return fallback;
+    });
+
+    assert.deepEqual(asked, [
+      'planStep.tests',
+      'planStep.version',
+      'planStep.changelog',
+      'planStep.rebuild',
+      'planStep.commit'
+    ]);
   });
 });
 

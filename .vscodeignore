@@ -13,6 +13,7 @@ src/**
 dist-test/**
 node_modules/**
 esbuild.js
+reinstall.js
 tsconfig.json
 tsconfig.test.json
 **/*.map

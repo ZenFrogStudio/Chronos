@@ -22,6 +22,64 @@ logic out; one of the moves also narrowed a guard.
 
 ### Added
 
+- **Generated plans now end by recording what they changed.** A plan written by
+  the **Generate plan** button said what to build and nothing about what to do
+  afterwards, so an unattended overnight run finished with new behaviour in the
+  working tree, the old version number in `package.json`, no changelog entry and
+  nothing committed — the diff was the only record that anything had happened.
+
+  Chronos now asks for a closing step in every plan it generates: bump the
+  version, add a matching changelog entry, commit the result. Commit only,
+  nothing pushed. Two further steps are available and off by default — run the
+  test suite, and rebuild the project — because both cost an unattended run real
+  time and not every project wants either.
+
+  Each is its own setting, on the manager's **Settings** page under *Planning*
+  and in VS Code's own settings UI: `chronos.planStep.version`,
+  `chronos.planStep.changelog` and `chronos.planStep.commit` are on;
+  `chronos.planStep.tests` and `chronos.planStep.rebuild` are off. Switch all
+  five off and the instruction is exactly what it was before. This changes what
+  new plans say — plans already in the library are not rewritten.
+
+- **A spinner beside the plan title while a run is live.** The countdown ring
+  already swapped its arc for a rotating sweep, but sitting inside the clock it
+  read as part of the countdown; the only other signal was the words "running
+  now". The title now carries VS Code's own loading glyph for as long as the run
+  lasts.
+
+- **The manager works from the keyboard.** It was mouse-only. Every plan row is
+  a button, so Tab walked through the whole library one row at a time to reach
+  anything past it, and there was no way at all to open a plan, change its date
+  or schedule it without the pointer — while the Tasks sidebar had had arrow
+  keys since 0.8.0-rc.20.
+
+  The library now works the way that sidebar does: Tab crosses it once, and
+  <kbd>↑</kbd> / <kbd>↓</kbd> move through the plans with the detail pane
+  following the highlight, <kbd>Home</kbd> and <kbd>End</kbd> going to the first
+  and last. The ends are clamped rather than wrapped. From a row,
+  <kbd>Enter</kbd> steps into the plan's text, <kbd>S</kbd> schedules the plan or
+  pauses a scheduled one, <kbd>R</kbd> runs it now, and <kbd>D</kbd> opens the
+  When calendar. Those three letters fire only while the library has focus, so
+  typing *sardines* into a plan does not schedule anything.
+
+  <kbd>/</kbd> jumps to the search box from anywhere, <kbd>↓</kbd> from the
+  search box drops into the filtered list, and <kbd>Esc</kbd> goes back to the
+  list with the search term intact. <kbd>F6</kbd> moves between the library, the
+  plan and the Runs strip, <kbd>Shift+F6</kbd> back the other way.
+
+  In the When calendar the arrows move a day or a week, <kbd>PageUp</kbd> and
+  <kbd>PageDown</kbd> a month, and <kbd>Enter</kbd> sets the highlighted date,
+  keeping the plan's existing time of day. Nothing is saved until then and
+  <kbd>Esc</kbd> closes it having changed nothing, so you can browse to next
+  March and back without touching the schedule. The hour, minute and AM/PM
+  dropdowns are native controls and are left alone. **One existing control
+  changes**: the calendar's month arrows now carry the highlight with them
+  instead of moving the view alone — they still schedule nothing.
+
+  The whole map is listed under **Keyboard shortcuts** at the foot of the
+  manager's Settings page, generated from the same table the handlers are
+  written beside, so the page and the keys cannot drift apart.
+
 - **The manager's three panels resize by dragging their dividers.** The plan
   library was a hard 260px, which truncated any plan name longer than a few
   words, and the Runs strip was 220px or hidden with nothing in between. There
@@ -55,7 +113,33 @@ logic out; one of the moves also narrowed a guard.
   updates the page without a reload, and **Edit in VS Code Settings ↗** is the
   escape hatch for the workspace-scope edits this page deliberately does not do.
 
+- **`npm run reinstall` puts the build into VS Code.** `npm run package` stopped
+  at a `.vsix` on the disk, and nothing carried it any further. Because Chronos
+  schedules work on its own repository, that gap had teeth: an unattended run
+  could edit the source, typecheck, test, compile and package, report itself
+  completed — and the editor went on serving the copy it loaded at startup, with
+  nothing anywhere saying the two had drifted apart. An evening of finished work
+  read as an evening of work that had silently done nothing. The new script
+  packages and then installs, naming the `.vsix` from the version in
+  `package.json` so it can never push a stale one, and closes by saying to reload
+  the window — installing over a running window does not swap the code already
+  loaded, which is the other half of the same trap. It installs into VSCodium,
+  which is the editor this is developed in: it and Microsoft's build keep
+  separate extension folders, and the `code` command on PATH is the latter, so
+  installing with it succeeds, says so, and leaves the editor you are actually
+  looking at untouched — a third way for the same evening's work to disappear,
+  and the one that hid the first two. It is called `reinstall` rather than
+  `install` because npm runs a script by the latter name itself during
+  `npm install`; source guards now hold that name, the editor it targets, the
+  script's existence and its version lookup.
+
 ### Changed
+
+- **Every schedule now points at this folder.** Six series carried a working
+  directory of `d:\03-Software\Chronus` — the pre-rename spelling, for a folder
+  that no longer exists. They were left enabled, so each was a run waiting to
+  fail on a directory that could not be entered. Rewritten in place to the real
+  path; the schedules themselves are untouched.
 
 - **Generate plan no longer asks which model should plan the task.** The
   QuickPick fired before every planning session and preselected the answer you
@@ -281,6 +365,22 @@ logic out; one of the moves also narrowed a guard.
 
   New setting `chronos.opencodePath`. `src/models.ts` became `src/agents.ts`,
   which now holds the engine table and both model lists.
+
+  Verified against a real `opencode` 1.18.5 run rather than assumed: the tool
+  event arrives as `type:"tool_use"` with the name in `part.tool` and the target
+  in `part.state.input.filePath`, so opencode transcripts record what a run
+  touched the same way Claude's do.
+
+- **A rejected opencode login is now reported instead of retried.** Chronos
+  treats an authentication failure as permanent, because an expired token fails
+  every task identically and three retries an hour apart only delay the
+  discovery by three hours. That check reads either an API status code or the
+  wording of the error, and opencode supplied neither: it words a 401 as
+  "Upstream request failed: [401] Provider returned error", which matches none
+  of the credential phrases, and its status code was being dropped during
+  parsing. So a run that failed purely because you had not logged in was filed
+  as an ordinary failure and retried. The parser now carries the status code
+  through, which is all the existing check needed. Claude's path is unchanged.
 
 - **The activity-bar view is now a task inbox.** It held two rows — *Open
   Manager* and *Schedule a Markdown file…* — both of which the status bar, the

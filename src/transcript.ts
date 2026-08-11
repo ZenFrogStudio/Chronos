@@ -175,6 +175,11 @@ function parseOpencodeLine(event: any): ParsedLine {
       summary: {
         ...summary,
         resultText: String(event.error?.data?.message ?? event.error?.name ?? 'opencode reported an error.'),
+        // The only reliable sign of a rejected login. opencode words a 401 as
+        // "Upstream request failed: [401] Provider returned error", which none
+        // of `AUTH_PATTERNS` matches — so without the code an expired provider
+        // login is filed as an ordinary failure and retried for hours.
+        apiErrorStatus: text(event.error?.data?.statusCode),
         sawResult: true,
         isError: true
       }

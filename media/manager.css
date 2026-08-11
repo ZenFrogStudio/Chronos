@@ -450,6 +450,14 @@ body.is-resizing .activity {
   white-space: nowrap;
 }
 
+/* The title's run marker. `flex: none` so the title ellipsizes into it rather
+   than squashing it — .detail-title already has overflow:hidden, which is what
+   lets it shrink inside the flex row. */
+.head-spinner {
+  flex: none;
+  color: var(--sodium);
+}
+
 .head-status {
   margin: 2px 0 0;
   font-size: 0.82em;
@@ -587,6 +595,38 @@ select.field-input {
   gap: 8px;
 }
 
+/* --- Keyboard shortcuts, at the foot of the Settings page ---
+   Two columns: the keys, and what they do. Where each key works is folded into
+   the description rather than given a third column, so a narrow detail pane
+   wraps prose instead of squeezing three columns. */
+
+.shortcuts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 12px;
+  align-items: baseline;
+  font-size: 0.9em;
+}
+
+.shortcut-keys {
+  display: flex;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.shortcut-where {
+  color: var(--muted);
+}
+
+kbd {
+  padding: 1px 5px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--muted);
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 0.9em;
+}
+
 /* --- The when picker ---
    A native datetime-local opened a calendar drawn by the browser, outside the
    page, where only color-scheme reached it. This one is our own DOM, so it takes
@@ -676,8 +716,11 @@ select.field-input {
   color: var(--vscode-foreground);
 }
 
+/* :focus as well as :focus-visible on a day, because the arrow keys move focus
+   programmatically and the highlight is the only thing showing where they are. */
 .picker-nav:focus-visible,
-.picker-day:focus-visible {
+.picker-day:focus-visible,
+.picker-day:focus {
   outline: 1px solid var(--accent);
   outline-offset: 1px;
 }
@@ -954,6 +997,9 @@ select.field-input {
   .activity { transition: none; }
   .ring-sweep,
   .run-dot.is-running::after { animation: none; }
+  /* animation-name, not the shorthand: codicon.css sets duration and easing
+     !important, which the shorthand cannot beat. */
+  .head-spinner.codicon-modifier-spin { animation-name: none; }
 }
 
 .days {

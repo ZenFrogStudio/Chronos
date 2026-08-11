@@ -2,7 +2,7 @@ import { randomBytes } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { generateCommand, shellKind } from './launch';
+import { enabledPlanSteps, generateCommand, shellKind } from './launch';
 import * as library from './library';
 import { log } from './log';
 import { createNonce, Manager } from './manager';
@@ -292,7 +292,10 @@ export class TaskView implements vscode.WebviewViewProvider, vscode.Disposable {
       // inside the folder's `.chronos` root.
       allowDir: paths.root,
       model: model || undefined,
-      shell: shellKind(vscode.env.shell, process.platform)
+      shell: shellKind(vscode.env.shell, process.platform),
+      // What the plan is asked to do once the work itself is done, so an
+      // overnight run does not finish with an untracked working tree.
+      steps: enabledPlanSteps((key, fallback) => config.get<boolean>(key, fallback))
     });
 
     // Scoped to this session's folder, so a landed file needs no guessing about

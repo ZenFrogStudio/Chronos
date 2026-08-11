@@ -60,6 +60,15 @@ capture → generate → schedule → run
 Back out at any point — Escape, closing the terminal, never approving — and
 nothing is created; the task stays exactly where it was.
 
+Every generated plan ends with a closing step: bump the project version, add a
+matching changelog entry, and commit the result to git. That is what stops an
+unattended overnight run finishing with new behaviour, an untracked working tree
+and no record of what changed. Two more steps are there and switched off —
+running the test suite and rebuilding the project. Each of the five is its own
+setting under `chronos.planStep.*`, on the same **Settings** page, and turning
+one off changes only the plans generated afterwards; plans already in your
+library are untouched.
+
 Planning uses whichever model `chronos.planModel` names — set it on the manager's
 **Settings** page, behind the gear beside the plan library. It does not affect
 scheduled runs, which use each plan's own model setting.

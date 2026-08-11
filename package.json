@@ -2,7 +2,7 @@
   "name": "chronos",
   "displayName": "Chronos",
   "description": "Schedule Claude Code tasks from Markdown plan files.",
-  "version": "0.8.0-rc.35",
+  "version": "0.8.0-rc.41",
   "publisher": "Z3n",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -154,6 +154,31 @@
           ],
           "markdownDescription": "Model used whenever Chronos opens a planning session — the **Generate plan** button on a task in the **Tasks** view. Leave as **Account default** to let Claude choose. It does not affect scheduled runs, which use each plan's own model."
         },
+        "chronos.planStep.tests": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Ask every generated plan to end by running the project test suite and getting it passing. Off by default: not every project has a suite worth running unattended. Affects plans Chronos generates from now on; plans already in your library are untouched."
+        },
+        "chronos.planStep.version": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Ask every generated plan to end by bumping the project version. Without it an overnight run leaves new behaviour shipping under the old version number. Affects plans Chronos generates from now on; plans already in your library are untouched."
+        },
+        "chronos.planStep.changelog": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Ask every generated plan to end by adding a matching changelog entry. Without it the only record of what the agent changed is the diff. Affects plans Chronos generates from now on; plans already in your library are untouched."
+        },
+        "chronos.planStep.rebuild": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Ask every generated plan to end by rebuilding the project. Off by default: a build is slow, and most changes are verified by the tests rather than by the artefact. Affects plans Chronos generates from now on; plans already in your library are untouched."
+        },
+        "chronos.planStep.commit": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Ask every generated plan to end by committing the result to git. Without it an unattended run finishes with an untracked working tree and no record of what changed. Commit only — nothing is pushed. Affects plans Chronos generates from now on; plans already in your library are untouched."
+        },
         "chronos.showTerminalOnRun": {
           "type": "boolean",
           "default": true,
@@ -213,7 +238,8 @@
     "typecheck": "tsc --noEmit",
     "test": "node --test dist-test/test/",
     "pretest": "tsc -p tsconfig.test.json",
-    "package": "npm run typecheck && npm run build && vsce package"
+    "package": "npm run typecheck && npm run build && vsce package",
+    "reinstall": "npm run package && node reinstall.js"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",
