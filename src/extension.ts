@@ -9,7 +9,7 @@ import { initLog, log, logConsolidation, logRetirement, pruneLogs } from './log'
 import { Manager } from './manager';
 import { migrate } from './migrate';
 import { retireCompletedPlans } from './retire';
-import { ChronosPaths, ensureRoot, pathsFor } from './roots';
+import { ChronosPaths, ensureRoot, pathsFor, sweepPending } from './roots';
 import { probeAgent, Runner } from './runner';
 import { Scheduler } from './scheduler';
 import { writeState } from './state-file';
@@ -52,7 +52,26 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   const scheduler = new Scheduler(store, runner, () => paths().lock, retire);
 
+  /**
+   * Staging folders left by planning sessions that ended with the window rather
+   * than with their terminal. `roots.ts` cannot reach the log channel, so it
+   * reports rather than logs and the writing happens here.
+   *
+   * A kept folder is a `warn`: it holds a generated plan that never reached the
+   * library, and its path is the only thing that will lead the user back to it.
+   */
+  const sweep = (): void => {
+    const report = sweepPending(paths().pending);
+    if (report.removed > 0) {
+      log.info(`removed ${report.removed} abandoned plan staging folder(s)`);
+    }
+    for (const dir of report.kept) {
+      log.warn(`kept ${dir} — it still holds a generated plan that never reached the library`);
+    }
+  };
+
   pruneLogs(paths().logs, config().get<number>('logRetentionDays', 30));
+  sweep();
 
   // Plans scheduled in place by an older version are copied in here, so the rest
   // of the session can assume every scheduled plan is a library plan. The sweep
@@ -92,6 +111,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     seedIfNew(paths(), ensureRoot(paths()));
     await store.retarget(paths().state);
     pruneLogs(paths().logs, config().get<number>('logRetentionDays', 30));
+    // Switching folder changes which `.pending` is in play.
+    sweep();
     logConsolidation(await consolidate(store, paths().plans, paths().archivedPlans));
     await retire();
 

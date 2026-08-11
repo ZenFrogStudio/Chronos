@@ -126,6 +126,18 @@ describe('writeState', () => {
     assert.deepEqual(fs.readdirSync(dir), ['state.json']);
   });
 
+  it('should_not_write_through_a_name_another_window_could_be_using', () => {
+    // The shared `${file}.tmp` path is what a second window would be writing.
+    // Touching it at all is the collision that empties somebody's schedule.
+    const sentinel = `${file}.tmp`;
+    fs.writeFileSync(sentinel, 'another window is mid-write', 'utf8');
+
+    writeState(file, emptyState());
+
+    assert.equal(fs.readFileSync(sentinel, 'utf8'), 'another window is mid-write');
+    assert.deepEqual(readState(file).state, emptyState());
+  });
+
   it('should_replace_a_previous_schedule_completely', () => {
     // A shorter write must not leave the tail of the longer one behind, which
     // is exactly what an in-place overwrite would risk.

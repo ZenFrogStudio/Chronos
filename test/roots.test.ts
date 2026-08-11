@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
-import { ensureRoot, pathsFor, ROOT_DIR } from '../src/roots';
+import { ensureRoot, pathsFor, ROOT_DIR, sweepPending } from '../src/roots';
 
 let folder: string;
 
@@ -96,5 +96,66 @@ describe('ensureRoot', () => {
     ensureRoot(paths);
 
     assert.equal(fs.readFileSync(ignore, 'utf8'), 'state.json\nlogs/\n');
+  });
+});
+
+describe('sweepPending', () => {
+  const DAY_MS = 24 * 60 * 60_000;
+
+  /** A staging folder, aged by hand — the sweep decides on the folder's mtime. */
+  function session(pending: string, name: string, ageMs: number, plan?: string): string {
+    const dir = path.join(pending, name);
+    fs.mkdirSync(dir, { recursive: true });
+    if (plan) {
+      fs.writeFileSync(path.join(dir, plan), '# a plan\n', 'utf8');
+    }
+    const when = new Date(Date.now() - ageMs);
+    fs.utimesSync(dir, when, when);
+    return dir;
+  }
+
+  it('should_remove_an_empty_staging_folder_past_the_cutoff', () => {
+    const paths = pathsFor(folder);
+    const stale = session(paths.pending, 'aaaaaaaaaaaa', 3 * DAY_MS);
+
+    const report = sweepPending(paths.pending);
+
+    assert.equal(report.removed, 1);
+    assert.deepEqual(report.kept, []);
+    assert.equal(fs.existsSync(stale), false);
+  });
+
+  it('should_keep_a_folder_younger_than_the_cutoff', () => {
+    // The second-window case: another window may have a session in flight right
+    // now, and deleting its staging folder breaks the write it is waiting for.
+    const paths = pathsFor(folder);
+    const live = session(paths.pending, 'bbbbbbbbbbbb', 5 * 60_000);
+
+    const report = sweepPending(paths.pending);
+
+    assert.equal(report.removed, 0);
+    assert.equal(fs.existsSync(live), true);
+  });
+
+  it('should_keep_a_stale_folder_that_still_holds_a_plan_and_report_it', () => {
+    // The plan in there is generated work that never reached the library, and
+    // this is the only copy of it.
+    const paths = pathsFor(folder);
+    const rescuable = session(paths.pending, 'cccccccccccc', 3 * DAY_MS, 'add-a-retry-button.md');
+
+    const report = sweepPending(paths.pending);
+
+    assert.equal(report.removed, 0);
+    assert.deepEqual(report.kept, [rescuable]);
+    assert.equal(fs.existsSync(rescuable), true);
+  });
+
+  it('should_report_nothing_for_a_pending_folder_that_was_never_created', () => {
+    // A folder that has never generated a plan has no `.pending` at all.
+    const paths = pathsFor(folder);
+
+    const report = sweepPending(paths.pending);
+
+    assert.deepEqual(report, { removed: 0, kept: [] });
   });
 });

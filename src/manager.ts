@@ -30,7 +30,6 @@ type Inbound =
   | { type: 'revealLibrary' }
   | { type: 'schedulePlan'; name: string }
   | { type: 'updateSeries'; id: string; patch: Partial<TaskSeries> }
-  | { type: 'removeSeries'; id: string }
   | { type: 'browseCwd'; id: string }
   | { type: 'runNow'; seriesId: string; dismissRunId?: string }
   | { type: 'cancelRun'; id: string }
@@ -395,9 +394,6 @@ export class Manager implements vscode.Disposable {
         }
         return this.store.updateSeries(message.id, patch);
       }
-
-      case 'removeSeries':
-        return this.store.removeSeries(message.id);
 
       case 'browseCwd': {
         const series = this.store.getSeriesById(message.id);

@@ -80,6 +80,20 @@ describe('source guards', () => {
     assert.deepEqual(missing, [], `tasks.ts never replaces: ${missing.join(', ')}`);
   });
 
+  it('should_keep_the_task_view_listening_for_its_planning_terminal_closing', () => {
+    // `tasks.ts` imports `vscode` and cannot load in the plain Node runner, so
+    // nothing else here can watch a session end. Losing this listener fails
+    // completely silently: a session backed out of holds its row amber and its
+    // Generate button disabled for the life of the window, with nothing in the
+    // log to say why.
+    const tasks = fs.readFileSync(path.join(SRC, 'tasks.ts'), 'utf8');
+
+    assert.ok(
+      tasks.includes('onDidCloseTerminal'),
+      'src/tasks.ts no longer listens for the planning terminal closing'
+    );
+  });
+
   it('should_ship_the_codicons_the_task_view_asks_for', () => {
     // Both files, because the inbox names glyphs in two places: the rows are
     // built in JS, the Generate button is in the HTML.
@@ -213,6 +227,15 @@ describe('source guards', () => {
       page.slice(0, page.indexOf('\n  }')).includes('${shortcutsSection()}'),
       'settingsPage never renders the shortcuts table'
     );
+  });
+
+  it('should_never_let_the_manager_destroy_a_series_and_its_run_history', () => {
+    // Unscheduling switches a series off; it does not delete it. `removeSeries`
+    // takes every run record with it (store.ts), so a webview that can still send
+    // it turns one click on the main toggle into a silent loss of history.
+    const js = fs.readFileSync(path.join(MEDIA, 'manager.js'), 'utf8');
+
+    assert.ok(!js.includes('removeSeries'), 'media/manager.js can still remove a series');
   });
 
   it('should_ship_a_sash_element_for_every_sash_rule', () => {

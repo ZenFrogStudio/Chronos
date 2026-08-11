@@ -1,3 +1,4 @@
+import { randomBytes } from 'crypto';
 import * as fs from 'fs';
 import { migrate } from './migrate';
 import { ChronosState, SCHEMA_VERSION } from './types';
@@ -11,6 +12,15 @@ import { ChronosState, SCHEMA_VERSION } from './types';
  * rather than in `store.ts` so it can be exercised by the plain Node test
  * runner: no `vscode` import, same rule as `consolidate.ts` and `remote.ts`.
  */
+
+/**
+ * Names this window's temp file apart from every other window's.
+ *
+ * Once per process rather than once per write: unique against the window next
+ * door, but reused by every write this window makes, so a crash mid-write can
+ * strand one temp file here and never a growing pile of them.
+ */
+const WRITER = randomBytes(4).toString('hex');
 
 export function emptyState(): ChronosState {
   return { schemaVersion: SCHEMA_VERSION, series: [], runs: [] };
@@ -88,9 +98,14 @@ export function updateState(
  * Writes through a temp file and a rename. A rename is atomic on both NTFS and
  * ext4, so a crash mid-write leaves either the old schedule or the new one —
  * never a truncated file that reads as "every task has been deleted".
+ *
+ * That only holds while nobody else is writing the same temp path, though. Two
+ * windows on one folder are two processes with no sight of each other, and a
+ * shared temp name would let their writes interleave into a file that parses as
+ * nothing — hence the per-window name.
  */
 export function writeState(file: string, state: ChronosState): void {
-  const temp = `${file}.tmp`;
+  const temp = `${file}.${WRITER}.tmp`;
   fs.writeFileSync(temp, JSON.stringify(state), 'utf8');
   fs.renameSync(temp, file);
 }

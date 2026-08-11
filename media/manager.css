@@ -862,13 +862,9 @@ kbd {
   border-color: var(--border);
 }
 
-.button.is-danger:hover {
-  background: color-mix(in srgb, var(--danger) 22%, transparent);
-  color: var(--danger);
-}
-
 /* The schedule toggle turns sodium only while the job is actually live —
-   the one colour Chronos spends on liveness. Paused/unscheduled stay quiet. */
+   the one colour Chronos spends on liveness. Anything unscheduled, and a spent
+   one-shot with nothing left to fire, stays quiet. */
 .schedule-toggle.is-scheduled {
   border-color: var(--sodium);
   background: color-mix(in srgb, var(--sodium) 14%, transparent);

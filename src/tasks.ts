@@ -60,6 +60,8 @@ interface PendingPlan {
   taskName: string;
   dir: string;
   watcher: vscode.FileSystemWatcher;
+  /** The tab the session is being held in. Its closing is what ends the session. */
+  terminal: vscode.Terminal;
 }
 
 export class TaskView implements vscode.WebviewViewProvider, vscode.Disposable {
@@ -74,6 +76,15 @@ export class TaskView implements vscode.WebviewViewProvider, vscode.Disposable {
    */
   private readonly awaitingPlan = new Map<string, PendingPlan>();
 
+  /**
+   * Closing the planning terminal is the only end-of-session signal VS Code
+   * offers, and without it a session backed out of holds its row amber for the
+   * life of the window.
+   */
+  private readonly terminals = vscode.window.onDidCloseTerminal((terminal) =>
+    this.onTerminalClosed(terminal)
+  );
+
   constructor(
     private readonly extensionUri: vscode.Uri,
     /** The active folder's layout. A thunk, so switching folders re-points the
@@ -83,11 +94,12 @@ export class TaskView implements vscode.WebviewViewProvider, vscode.Disposable {
   ) {}
 
   dispose(): void {
-    for (const pending of this.awaitingPlan.values()) {
-      pending.watcher.dispose();
-      fs.rmSync(pending.dir, { recursive: true, force: true });
+    this.terminals.dispose();
+    // Over a copy of the keys, because `discard` deletes from the map it is
+    // iterating.
+    for (const id of [...this.awaitingPlan.keys()]) {
+      this.discard(id);
     }
-    this.awaitingPlan.clear();
   }
 
   ///////////////////////////*The view*////////////////////////////
@@ -311,17 +323,70 @@ export class TaskView implements vscode.WebviewViewProvider, vscode.Disposable {
         log.error('adopting a generated plan failed', err)
       );
     });
-    this.awaitingPlan.set(sessionId, { taskName: task.name, dir: sessionDir, watcher });
-
+    // Before the map entry, so the entry can carry the terminal that ends the
+    // session. Nothing is running until `sendText` below, so there is no window
+    // here in which a plan could land ahead of the entry that would adopt it.
     const terminal = vscode.window.createTerminal({
       name: `Chronos: plan ${task.label.slice(0, 40)}`,
       cwd,
       iconPath: new vscode.ThemeIcon('lightbulb')
     });
+    this.awaitingPlan.set(sessionId, { taskName: task.name, dir: sessionDir, watcher, terminal });
+
     // Focus, unlike a scheduled run: you pressed a button and are about to type.
     terminal.show();
     terminal.sendText(command);
     log.info(`opened a planning session for task ${task.name} in ${cwd}`);
+  }
+
+  /**
+   * The end of a planning session. The signal is the *tab* closing rather than
+   * the CLI exiting: Chronos types `claude ...` into your own shell, so quitting
+   * Claude only returns you to a prompt, and while that prompt is there the
+   * session is genuinely resumable — the row staying amber until the tab goes is
+   * the honest answer.
+   *
+   * A plan sitting in the staging folder means the session finished and the
+   * watcher missed the event, so it is adopted exactly as it would have been.
+   * Otherwise the session was backed out of: it is discarded, the task is left
+   * untouched, and the whole of the notice is one log line, because closing a
+   * terminal you meant to close is not news.
+   */
+  private onTerminalClosed(terminal: vscode.Terminal): void {
+    const found = [...this.awaitingPlan.entries()].find(([, p]) => p.terminal === terminal);
+    if (!found) {
+      return; // Almost every terminal closed in a window is not one of ours.
+    }
+    const [sessionId, pending] = found;
+
+    const [landed] = library.listPlans(pending.dir);
+    if (landed) {
+      this.onPlanLanded(sessionId, vscode.Uri.file(landed.filePath)).catch((err) =>
+        log.error('adopting a generated plan failed', err)
+      );
+      return;
+    }
+
+    this.discard(sessionId);
+    log.info(`planning session for task ${pending.taskName} was abandoned; the task is unchanged`);
+    this.post();
+  }
+
+  /**
+   * Forgets a session and takes its staging folder with it. Safe to call for an
+   * id that is already gone, which is what makes the two ways a session can end
+   * — a plan landing and the terminal closing — free of any race: `onPlanLanded`
+   * deletes its entry before its first `await`, so whichever arrives second
+   * finds nothing and returns.
+   */
+  private discard(sessionId: string): void {
+    const pending = this.awaitingPlan.get(sessionId);
+    if (!pending) {
+      return;
+    }
+    this.awaitingPlan.delete(sessionId);
+    pending.watcher.dispose();
+    fs.rmSync(pending.dir, { recursive: true, force: true });
   }
 
   /**

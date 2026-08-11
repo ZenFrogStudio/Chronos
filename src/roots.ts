@@ -81,3 +81,63 @@ export function ensureRoot(paths: ChronosPaths): boolean {
 
   return created;
 }
+
+/** What one sweep of the staging area did. */
+export interface SweepReport {
+  /** How many staging folders were deleted. */
+  removed: number;
+  /** Folders left alone because a generated plan is still sitting in them. */
+  kept: string[];
+}
+
+/**
+ * Deletes staging folders no planning session will ever come back for.
+ *
+ * `TaskView.dispose` clears the sessions it knows about, but it only runs on a
+ * clean shutdown — a crashed or reloaded window strands its folders whatever the
+ * view does, which is how `.pending` fills up.
+ *
+ * Two gates, and both are load-bearing:
+ *
+ * - **Older than `maxAgeMs`.** A second window open on the same project may have
+ *   a session in flight right now, and that session's staging folder is minutes
+ *   old. Deleting it out from under the session breaks the write it is waiting
+ *   for, so anything recent is left alone regardless of what is in it.
+ * - **Holds no `.md`.** A stale folder with a plan in it holds generated work
+ *   that never reached the library, and this is the only copy of it. It is kept
+ *   and its path reported, so the user can rescue it by hand.
+ *
+ * Best-effort throughout, like `pruneLogs`: a `.pending` that was never created
+ * reports nothing, and one unreadable folder does not abort the rest.
+ */
+export function sweepPending(dir: string, maxAgeMs = 24 * 60 * 60_000): SweepReport {
+  const report: SweepReport = { removed: 0, kept: [] };
+  const cutoff = Date.now() - maxAgeMs;
+
+  let names: string[];
+  try {
+    names = fs.readdirSync(dir);
+  } catch {
+    return report; // A folder that has never generated a plan has no `.pending`.
+  }
+
+  for (const name of names) {
+    const session = path.join(dir, name);
+    try {
+      const stat = fs.statSync(session);
+      if (!stat.isDirectory() || stat.mtimeMs >= cutoff) {
+        continue;
+      }
+      if (fs.readdirSync(session).some((file) => file.toLowerCase().endsWith('.md'))) {
+        report.kept.push(session);
+        continue;
+      }
+      fs.rmSync(session, { recursive: true, force: true });
+      report.removed++;
+    } catch {
+      // An unreadable folder is not worth abandoning the rest of the sweep for.
+    }
+  }
+
+  return report;
+}

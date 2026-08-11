@@ -135,6 +135,31 @@ logic out; one of the moves also narrowed a guard.
 
 ### Changed
 
+- **Scheduling and unscheduling are one button, and unscheduling no longer
+  throws the run history away.** The plan pane carried two controls for the same
+  idea. A three-label toggle said **Schedule**, **Scheduled** or **Paused**
+  depending on where the plan was, and beside it sat a separate red
+  **Unschedule** button — two buttons, two vocabularies, and only one of them
+  obviously destructive. The red one deleted the series outright, and with it
+  every run record belonging to that series: unschedule a plan you had been
+  running for a month and the month's transcripts stopped being attributable to
+  it, the plan's own Runs list emptied, and the Runs panel relabelled what was
+  left *Removed plan*. There was no confirmation on any of that.
+
+  There is one toggle now, with two faces: **Schedule** when the plan is not
+  scheduled, **Unschedule** when it is. Unscheduling switches the series off and
+  keeps it — nothing is deleted, the past runs stay in the panel still named
+  after the plan and still listed under it, and pressing **Schedule** again
+  brings back the time, repeat, working directory, permission mode and model you
+  had already set. It is the same treatment a finished one-shot has always had.
+
+  Pause is gone as a user-facing idea along with it. A plan is scheduled or it
+  is not, so the head and the library row both read *Not scheduled* where they
+  used to read *Paused*, the <kbd>S</kbd> key schedules and unschedules rather
+  than schedules and pauses, and the amber still means only one thing: this is
+  genuinely going to run. Nothing in the manager removes a series any more —
+  **Archive**, which has always asked first, is how you are rid of one.
+
 - **Every schedule now points at this folder.** Six series carried a working
   directory of `d:\03-Software\Chronus` — the pre-rename spelling, for a folder
   that no longer exists. They were left enabled, so each was a run waiting to
@@ -530,6 +555,47 @@ logic out; one of the moves also narrowed a guard.
   since that one is still waiting for you to run or reschedule it.
 
 ### Fixed
+
+- **Backing out of a planning session no longer leaves the task stuck.** Pressing
+  **Generate plan** turned the task's dot amber and disabled its Generate button
+  until the plan came back. Nothing ever put that right if the plan did not come
+  back — press Esc, close the terminal, decide against it, and the task stayed
+  amber and un-plannable for the rest of the session, with the only way out being
+  to reload the window. Each attempt also left an empty folder behind in
+  `.chronos/.pending`, and a file watcher running on it for as long as the window
+  was open.
+
+  A planning session now ends when its terminal tab closes. If a plan is sitting
+  in the staging folder it is adopted exactly as it always was — so a session that
+  finished while the watcher missed the event still lands in your library — and if
+  there is no plan there the session is simply discarded: the dot goes back to
+  grey, the button re-enables, the staging folder is deleted and the task file is
+  not touched. The signal is the tab closing rather than Claude exiting, because
+  quitting Claude only returns you to a shell prompt and the session is still
+  resumable from there. Closing a terminal you meant to close is not news, so the
+  whole of the notice is one line in **Chronos: Show Logs**.
+
+  Folders stranded by a window that crashed or reloaded are swept on startup and
+  whenever you switch folder, once they are a day old — old enough that a second
+  window's session in flight cannot be caught by it. One with a plan still in it
+  is kept rather than deleted, since that plan never reached your library and is
+  the only copy; the log names the folder so you can rescue it by hand.
+
+- **Two windows open on one folder can no longer wipe the schedule between
+  them.** Every write to `state.json` goes through a temp file first and is then
+  renamed into place, which is what keeps a crash mid-write from truncating your
+  schedule. But that temp file had one fixed name, shared by every window — so
+  the scheduling window saving a finished run at the same instant you dragged a
+  time in a second window meant both were writing the same path. The two writes
+  interleaved into a file that parsed as nothing, and the next read set it aside
+  as unrecoverable and handed back an empty schedule: every plan and every run
+  gone from the manager at once.
+
+  Each window now writes through a temp name of its own, picked once when it
+  starts. Two windows can no longer pick the same one, and because a window
+  reuses its name for every write rather than picking a fresh one each time,
+  there is nothing left to accumulate — the worst a crash mid-write can leave
+  behind is a single stray file per window.
 
 - **Dragging a file from Windows Explorer onto the manager works again.** It had
   been failing with *"Could not read the dropped files — use Import instead."*

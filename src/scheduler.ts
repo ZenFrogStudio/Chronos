@@ -311,15 +311,15 @@ export class Scheduler implements vscode.Disposable {
   }
 
   /**
-   * A repeat rule that cannot produce an occurrence has been paused by
+   * A repeat rule that cannot produce an occurrence has been unscheduled by
    * `decide`. Said out loud rather than only logged: the task has stopped, and
    * a silently stopped scheduled task is the failure this whole design is
    * built to avoid.
    */
   private announceBroken(fileName: string, problem: string): void {
-    log.error(`paused ${fileName} — unusable repeat rule: ${problem}`);
+    log.error(`unscheduled ${fileName} — unusable repeat rule: ${problem}`);
     vscode.window.showErrorMessage(
-      `Chronos: paused "${fileName}" — its repeat rule is unusable (${problem}). ` +
+      `Chronos: unscheduled "${fileName}" — its repeat rule is unusable (${problem}). ` +
         'Set its schedule again to start it back up.'
     );
   }

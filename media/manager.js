@@ -300,7 +300,7 @@
   function headStatus(s) {
     if (!s) return '<p class="head-status">Not scheduled</p>';
     if (s.spent) return '<p class="head-status">Ran once</p>';
-    if (!s.enabled) return '<p class="head-status">Paused</p>';
+    if (!s.enabled) return '<p class="head-status">Not scheduled</p>';
     if (isRunning(s)) return '<p class="head-status"><span class="head-count">running now</span></p>';
     return `<p class="head-status">
       <span class="head-count" data-countdown="${esc(s.nextRunAt)}">${esc(countdownText(s.nextRunAt))}</span>
@@ -469,7 +469,7 @@
       return plan.modifiedMs ? `Edited ${formatAge(plan.modifiedMs)}` : 'Not scheduled';
     }
     if (!series.spent) {
-      return series.enabled ? formatWhen(series.nextRunAt) : 'Paused';
+      return series.enabled ? formatWhen(series.nextRunAt) : 'Not scheduled';
     }
 
     // Spent, so there is no next occurrence to name — say how it ended instead.
@@ -560,8 +560,7 @@
       return;
     }
 
-    // Write the plan, decide when it runs, read what happened — then the rare
-    // and destructive management actions, last.
+    // Write the plan, decide when it runs, read what happened — in that order.
     const series = seriesForPlan(plan);
     detailEl.innerHTML = `
       <div class="detail-head">
@@ -679,16 +678,16 @@
     </div>`;
   }
 
-  /** The one control that schedules an unscheduled plan and, once scheduled,
-   *  toggles it between live and paused. Amber only while it is actually live. */
+  /** The one control that puts a plan on the schedule and takes it back off
+   *  again. Amber only while it is actually live. */
   function scheduleToggle(plan, series) {
     const live = !!series && series.enabled && !series.spent;
-    const label = !series ? 'Schedule' : series.enabled ? 'Scheduled' : 'Paused';
+    const label = series && series.enabled ? 'Unschedule' : 'Schedule';
     // Keyed off `enabled`, not `live`: a spent one-shot is still enabled, so a
-    // click pauses it — the tooltip has to name the click's actual effect.
-    const title = !series
-      ? 'Schedule this plan'
-      : series.enabled ? 'Scheduled — click to pause' : 'Paused — click to resume';
+    // click really does unschedule it — the tooltip has to name that effect.
+    const title = series && series.enabled
+      ? 'Scheduled — click to unschedule'
+      : 'Schedule this plan';
     return `<button class="button is-quiet schedule-toggle${live ? ' is-scheduled' : ''}"
       type="button" data-action="schedule-toggle" title="${esc(title)}">${label}</button>`;
   }
@@ -746,7 +745,6 @@
       <div class="actions">
         <button class="button" type="button" data-action="run-now">Run now</button>
         ${scheduleToggle(planByName(selected), s)}
-        <button class="button is-quiet is-danger" type="button" data-action="unschedule">Unschedule</button>
       </div>
     </div>`;
   }
@@ -1324,8 +1322,9 @@
 
   /**
    * The one branch behind both the Schedule button and the library's `S`. With
-   * nothing scheduled this is what creates it; resuming a spent one-shot has to
-   * clear `spent`, or it will never fire.
+   * nothing scheduled this is what creates it; unscheduling switches the series
+   * off and keeps it, so the settings and the run history survive. Scheduling a
+   * spent one-shot again has to clear `spent`, or it will never fire.
    */
   function toggleSchedule(plan, series) {
     if (!series) return send({ type: 'schedulePlan', name: plan.name });
@@ -1353,7 +1352,6 @@
     if (runAction(action, runId, series)) return;
     if (!series) return;
 
-    if (action === 'unschedule') return send({ type: 'removeSeries', id: series.id });
     if (action === 'browse-cwd') return send({ type: 'browseCwd', id: series.id });
 
     if (action === 'picker-toggle') {
@@ -1519,7 +1517,7 @@
     { keys: ['↑', '↓'], where: 'Plan library', what: 'Move through plans; the plan you land on opens' },
     { keys: ['Home', 'End'], where: 'Plan library', what: 'First / last plan' },
     { keys: ['Enter'], where: 'Plan library', what: 'Step into the plan’s text' },
-    { keys: ['S'], where: 'Plan library', what: 'Schedule, or pause a scheduled plan' },
+    { keys: ['S'], where: 'Plan library', what: 'Schedule, or unschedule a scheduled plan' },
     { keys: ['R'], where: 'Plan library', what: 'Run now' },
     { keys: ['D'], where: 'Plan library', what: 'Open the When calendar' },
     { keys: ['/'], where: 'Anywhere', what: 'Jump to the search box' },
