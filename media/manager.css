@@ -1238,6 +1238,17 @@ kbd {
   margin-left: auto;
 }
 
+/* The library header's icon button, shrunk to a run row's line height —
+   at its native 24px it grows every row in the panel. */
+.activity-actions .icon-action {
+  width: 20px;
+  height: 20px;
+}
+
+.activity-actions .codicon {
+  font-size: 14px;
+}
+
 .activity-empty {
   margin: 16px 0;
   text-align: center;

@@ -32,6 +32,7 @@ type Inbound =
   | { type: 'updateSeries'; id: string; patch: Partial<TaskSeries> }
   | { type: 'browseCwd'; id: string }
   | { type: 'runNow'; seriesId: string; dismissRunId?: string }
+  | { type: 'rerunRun'; id: string }
   | { type: 'cancelRun'; id: string }
   | { type: 'dismissRun'; id: string }
   | { type: 'openResult'; id: string }
@@ -414,20 +415,43 @@ export class Manager implements vscode.Disposable {
       }
 
       case 'runNow':
-        if (!this.scheduler.leading) {
-          // Names the folder for the reason the banner in manager.js does: with
-          // per-folder data this can only be a second window on this one folder.
-          this.notify(
-            `Another window is open on this same folder (${path.basename(this.paths().folder)}) ` +
-              'and is running its schedule. Nothing will run from this window — use that ' +
-              'window, or close it.'
-          );
+        if (!this.canRunHere()) {
           return;
         }
         if (message.dismissRunId) {
           await this.store.removeRun(message.dismissRunId);
         }
         return this.scheduler.runNow(message.seriesId);
+
+      // No dismissRun here, unlike a missed run's Run now: the original run is
+      // history and stays in the panel.
+      case 'rerunRun': {
+        const run = this.store.getRunById(message.id);
+        const series = run ? this.store.getSeriesById(run.seriesId) : undefined;
+        if (!series) {
+          this.notify('That run belongs to a plan that is no longer scheduled.');
+          return;
+        }
+        // Before the modal: asking the user to confirm something that is then
+        // refused reads as a bug.
+        if (!this.canRunHere()) {
+          return;
+        }
+        // No run keeps a copy of the plan text it ran, so this is the plan as it
+        // stands now — said out loud, because the button does not imply it.
+        const choice = await vscode.window.showWarningMessage(
+          `Run "${series.fileName}" again now?`,
+          {
+            modal: true,
+            detail: 'Runs the plan as it stands now, not a copy of what ran before.'
+          },
+          'Run'
+        );
+        if (!choice) {
+          return;
+        }
+        return this.scheduler.runNow(series.id);
+      }
 
       case 'cancelRun':
         this.scheduler.cancelRun(message.id);
@@ -513,6 +537,25 @@ export class Manager implements vscode.Disposable {
       default:
         log.warn(`unhandled manager message: ${JSON.stringify(message)}`);
     }
+  }
+
+  /**
+   * Refuses, out loud, when another window is running this folder's schedule.
+   * Shared by Run now and Re-run: a run queued here would land in this window's
+   * copy of the state and never fire. See `Scheduler.runNow`.
+   */
+  private canRunHere(): boolean {
+    if (this.scheduler.leading) {
+      return true;
+    }
+    // Names the folder for the reason the banner in manager.js does: with
+    // per-folder data this can only be a second window on this one folder.
+    this.notify(
+      `Another window is open on this same folder (${path.basename(this.paths().folder)}) ` +
+        'and is running its schedule. Nothing will run from this window — use that ' +
+        'window, or close it.'
+    );
+    return false;
   }
 
   /**

@@ -22,6 +22,25 @@ logic out; one of the moves also narrowed a guard.
 
 ### Added
 
+- **A re-run button on every finished run.** The Runs panel across the bottom of
+  the manager is the record of what the agent did, but a finished row offered
+  only **result** and **raw log** — reading, never doing. Running the same plan
+  again meant hunting it down in the library on the left, selecting it, and
+  pressing **Run now** in the detail pane, which is a long way round for the
+  thing you most often want after reading a result.
+
+  Every **completed**, **failed** or **cancelled** row in the panel now carries a
+  restart icon at its right-hand edge. A running row still offers **cancel**, a
+  queued row **skip**, and a missed row its existing **run now** — no row ends up
+  with two buttons that mean the same thing.
+
+  It asks first, in a modal, because a run spends money and edits the repository.
+  The prompt also says the thing the button cannot: no run keeps a copy of the
+  plan text it ran, so this runs the plan **as it stands now**, not a replay of
+  what happened before — including a plan you have since edited. A plan Chronos
+  has already auto-archived still runs, which covers most finished rows, since a
+  completed one-shot is archived and marked spent as a matter of course.
+
 - **Run a task straight from the inbox.** The only thing a captured task could
   become was a plan: pressing **Generate plan** opened an interactive planning
   session, and nothing ran until a plan had been written and landed in the

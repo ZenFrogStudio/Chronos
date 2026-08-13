@@ -1017,6 +1017,22 @@
     return actions;
   }
 
+  /** Rows that have finished and so have something to run again. */
+  const FINISHED = ['completed', 'failed', 'cancelled'];
+
+  /**
+   * Runs the row's plan again, now. Panel-only on purpose: the per-plan Runs
+   * section sits directly under that plan's own Run now button, so a second one
+   * there would say nothing. Absent when the series has gone — a deleted plan's
+   * rows still name it, greyed, but there is nothing left to run.
+   */
+  function rerunButton(run, series) {
+    if (!series || !FINISHED.includes(run.status)) return '';
+    return `<button class="icon-action" type="button" data-action="rerun-run"
+      data-run="${run.id}" title="Run this plan again" aria-label="Run this plan again">
+      <i class="codicon codicon-debug-restart"></i></button>`;
+  }
+
   /** A missed run has no result to show. This is what it says instead. */
   function missedNote(run) {
     if (run.status !== 'missed') return '';
@@ -1124,7 +1140,7 @@
       ${countdown}
       ${runBadges(run).join('')}
       ${note ? `<span class="activity-note">${esc(note)}</span>` : ''}
-      <span class="activity-actions">${runActions(run, series).join('')}</span>
+      <span class="activity-actions">${runActions(run, series).join('')}${rerunButton(run, series)}</span>
     </div>`;
   }
 
@@ -1261,6 +1277,11 @@
     }
     if (action === 'dismiss-run') {
       send({ type: 'dismissRun', id: runId });
+      return true;
+    }
+    // The run id is enough: the extension host looks the series up from the run.
+    if (action === 'rerun-run') {
+      send({ type: 'rerunRun', id: runId });
       return true;
     }
 
