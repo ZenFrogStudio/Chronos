@@ -36,6 +36,22 @@ export function pruneRuns(runs: readonly TaskRun[]): TaskRun[] {
   return keepNewest(capped, (run) => run.status === 'missed', MAX_MISSED_RUNS);
 }
 
+/**
+ * Where a job stands, judged from its runs alone.
+ *
+ * `in-flight` covers the moment before the run record exists: the series is
+ * written first and the run a tick later, and reading that gap as "finished"
+ * would clear a task whose job had not started.
+ */
+export type JobState = 'in-flight' | 'completed' | 'stopped';
+
+export function jobState(runs: readonly TaskRun[]): JobState {
+  if (!runs.length || runs.some((r) => r.status === 'pending' || r.status === 'running')) {
+    return 'in-flight';
+  }
+  return runs.some((r) => r.status === 'completed') ? 'completed' : 'stopped';
+}
+
 /** Keeps the newest `max` of the runs `matches` selects, leaving the rest alone. */
 function keepNewest(
   runs: TaskRun[],

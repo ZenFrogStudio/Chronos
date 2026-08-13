@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { pruneRuns } from '../src/history';
+import { jobState, pruneRuns } from '../src/history';
 import { MAX_MISSED_RUNS, MAX_RECENT_RUNS, RunStatus, TaskRun } from '../src/types';
 
 /**
@@ -108,6 +108,47 @@ describe('history — runs still in flight', () => {
     const runs = [...many('completed', MAX_RECENT_RUNS + 100, 'done'), ...running];
 
     assert.equal(countOf(pruneRuns(runs), 'running'), 10);
+  });
+});
+
+describe('jobState', () => {
+  it('should_report_in_flight_when_no_run_has_been_recorded_yet', () => {
+    // The series is written first and the run a tick later. Reading that gap as
+    // finished would clear a task whose job had not started.
+    const runs: TaskRun[] = [];
+
+    assert.equal(jobState(runs), 'in-flight');
+  });
+
+  it('should_report_in_flight_while_a_run_is_pending_or_running', () => {
+    const pending = many('pending', 1, 'queued');
+    const running = many('running', 1, 'live');
+
+    assert.equal(jobState(pending), 'in-flight');
+    assert.equal(jobState(running), 'in-flight');
+  });
+
+  it('should_report_completed_when_a_run_completed', () => {
+    const runs = many('completed', 1, 'done');
+
+    assert.equal(jobState(runs), 'completed');
+  });
+
+  it('should_report_stopped_when_every_run_failed_or_was_cancelled_or_missed', () => {
+    const runs = [
+      ...many('failed', 1, 'bad'),
+      ...many('cancelled', 1, 'stopped'),
+      ...many('missed', 1, 'missed')
+    ];
+
+    assert.equal(jobState(runs), 'stopped');
+  });
+
+  it('should_report_in_flight_when_a_completed_run_sits_beside_a_pending_one', () => {
+    // Otherwise a task is cleared out from under work still queued for it.
+    const runs = [...many('completed', 1, 'done'), ...many('pending', 1, 'queued')];
+
+    assert.equal(jobState(runs), 'in-flight');
   });
 });
 

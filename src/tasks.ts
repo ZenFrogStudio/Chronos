@@ -2,11 +2,15 @@ import { randomBytes } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
+import { jobState } from './history';
 import { enabledPlanSteps, generateCommand, shellKind } from './launch';
 import * as library from './library';
 import { log } from './log';
 import { createNonce, Manager } from './manager';
 import { ChronosPaths } from './roots';
+import { Scheduler } from './scheduler';
+import { createSeries } from './series';
+import { Store } from './store';
 
 /**
  * The activity-bar view: a task inbox.
@@ -38,6 +42,12 @@ import { ChronosPaths } from './roots';
  * guessed from the task text only ever repeats the request — and is adopted into
  * the library from there. The plan landing in the library is still what marks
  * the task finished.
+ *
+ * **Run** is the opposite route, for the one-line chore that does not need a plan
+ * written for it: the ordinary scheduled path, fired at once, with the task's own
+ * text as the prompt and no plan in between. Unattended, in `auto` mode, with a
+ * run record and a transcript like any other job — the task simply stays in the
+ * inbox until it finishes, and only a completed run clears it.
  */
 
 /** A row in the inbox. `name` is the file name, which is its identity. */
@@ -53,7 +63,8 @@ type Inbound =
   | { type: 'addTask'; text: string }
   | { type: 'editTask'; name: string; text: string }
   | { type: 'deleteTask'; name: string }
-  | { type: 'generatePlan'; name: string };
+  | { type: 'generatePlan'; name: string }
+  | { type: 'runTask'; name: string };
 
 /** A planning session in flight: its staging folder and the task that asked. */
 interface PendingPlan {
@@ -77,6 +88,14 @@ export class TaskView implements vscode.WebviewViewProvider, vscode.Disposable {
   private readonly awaitingPlan = new Map<string, PendingPlan>();
 
   /**
+   * Task file name → the series a Run launched for it. Held in memory only, for
+   * the same reason as `awaitingPlan`: a window reload loses the link, the run
+   * carries on in the manager, and the task is simply left in the inbox rather
+   * than cleared.
+   */
+  private readonly running = new Map<string, string>();
+
+  /**
    * Closing the planning terminal is the only end-of-session signal VS Code
    * offers, and without it a session backed out of holds its row amber for the
    * life of the window.
@@ -85,16 +104,29 @@ export class TaskView implements vscode.WebviewViewProvider, vscode.Disposable {
     this.onTerminalClosed(terminal)
   );
 
+  /**
+   * How a finished job clears its task. Assigned in the constructor body rather
+   * than here: `tsconfig.json` targets ES2022, so field initialisers run before
+   * the parameter properties below are assigned, and `this.store` would be
+   * `undefined` at this point.
+   */
+  private readonly runs: vscode.Disposable;
+
   constructor(
     private readonly extensionUri: vscode.Uri,
     /** The active folder's layout. A thunk, so switching folders re-points the
      *  inbox without rebuilding the view. */
     private readonly paths: () => ChronosPaths,
+    private readonly store: Store,
+    private readonly scheduler: Scheduler,
     private readonly manager: Manager
-  ) {}
+  ) {
+    this.runs = this.store.onDidChange(() => this.settleRuns());
+  }
 
   dispose(): void {
     this.terminals.dispose();
+    this.runs.dispose();
     // Over a copy of the keys, because `discard` deletes from the map it is
     // iterating.
     for (const id of [...this.awaitingPlan.keys()]) {
@@ -148,7 +180,8 @@ export class TaskView implements vscode.WebviewViewProvider, vscode.Disposable {
       tasks: this.list().map((task) => ({
         name: task.name,
         label: task.label,
-        generating: pending.has(task.name)
+        generating: pending.has(task.name),
+        running: this.running.has(task.name)
       }))
     });
   }
@@ -240,6 +273,15 @@ export class TaskView implements vscode.WebviewViewProvider, vscode.Disposable {
           await this.generatePlan(task);
         }
         // After, not before: this is what lights the row's dot amber.
+        this.post();
+        return;
+      }
+
+      case 'runTask': {
+        const task = this.list().find((t) => t.name === message.name);
+        if (task) {
+          await this.runTask(task);
+        }
         this.post();
         return;
       }
@@ -434,6 +476,103 @@ export class TaskView implements vscode.WebviewViewProvider, vscode.Disposable {
     this.post();
     this.manager.open();
     this.manager.reveal(plan.name);
+  }
+
+  ///////////////////////////*Running a task*////////////////////////////
+
+  /**
+   * Runs a task's own text as the prompt, at once and unattended — no plan
+   * written for it, because a one-line chore does not need one and an
+   * interactive planning session for it is friction on the fastest path in the
+   * product. Everything downstream is the ordinary scheduled path: a series, a
+   * run record, a transcript, and the same concurrency budget.
+   */
+  private async runTask(task: InboxTask): Promise<void> {
+    if (!fs.existsSync(task.filePath)) {
+      void vscode.window.showWarningMessage('That task no longer exists.');
+      return;
+    }
+    if (this.running.has(task.name)) {
+      return; // Already in flight. The button is disabled; the keyboard is not.
+    }
+    // Checked here rather than left to `runNow`, which only logs: a button that
+    // silently does nothing is worse than one that says why.
+    if (!this.scheduler.leading) {
+      void vscode.window.showWarningMessage(
+        `Another window is open on this same folder (${path.basename(this.paths().folder)}) ` +
+          'and is running its schedule. Run this from that window, or close it.'
+      );
+      return;
+    }
+
+    const paths = this.paths();
+    // The same door every outside file comes through, and what keeps
+    // `consolidate`'s invariant true: a series may only point into the library.
+    const plan = library.importFile(paths.plans, task.filePath);
+
+    const series = createSeries(plan.filePath, {
+      // The folder the task was captured in is the folder it runs against — the
+      // same rule the planning session uses.
+      cwd: paths.folder,
+      // Stated rather than left to the default, because this is the whole of what
+      // "run it in auto mode" means and it should not move if the default does.
+      permissionMode: 'auto',
+      // `createSeries` dates a new series an hour out. Without this the job would
+      // run now *and* again in an hour, from a plan the user never scheduled.
+      spent: true,
+      // You pressed Run and are watching. A retry an hour later, of a prompt that
+      // was never reviewed as a plan, is not what that button promised.
+      maxRetries: 0
+    });
+    await this.store.addSeries(series);
+
+    // Before `runNow`, so the first store change it causes already finds the link.
+    this.running.set(task.name, series.id);
+    await this.scheduler.runNow(series.id);
+    log.info(`running task ${task.name} directly as ${plan.name} in ${paths.folder}`);
+
+    // Focus stays in the sidebar — you pressed a button here, and the manager is
+    // where the run and its transcript will appear.
+    this.manager.open(true);
+    this.manager.reveal(plan.name);
+  }
+
+  /**
+   * Clears the tasks whose jobs have finished. A completed run means the task is
+   * done, so its file goes; anything else leaves the task where it was, because a
+   * failed run has not done the work and the row is the only thing that would
+   * remind you.
+   */
+  private settleRuns(): void {
+    if (!this.running.size) {
+      return;
+    }
+    let changed = false;
+
+    for (const [taskName, seriesId] of [...this.running]) {
+      const state = jobState(this.store.getRunsForSeries(seriesId));
+      if (state === 'in-flight') {
+        continue;
+      }
+      this.running.delete(taskName);
+      changed = true;
+
+      if (state === 'completed') {
+        try {
+          library.removePlan(this.paths().tasks, taskName);
+          log.info(`run for task ${taskName} completed; cleared the task`);
+        } catch (err) {
+          // A task already deleted by hand must not turn this into an error notice.
+          log.warn(`could not clear task ${taskName}: ${String(err)}`);
+        }
+      } else {
+        log.info(`run for task ${taskName} did not complete; the task stays in the inbox`);
+      }
+    }
+
+    if (changed) {
+      this.post();
+    }
   }
 }
 

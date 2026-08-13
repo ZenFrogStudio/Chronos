@@ -6,10 +6,11 @@
   const emptyEl = /** @type {HTMLElement} */ (document.getElementById('empty'));
   const inputEl = /** @type {HTMLInputElement} */ (document.getElementById('task-input'));
   const addEl = /** @type {HTMLElement} */ (document.getElementById('add-task'));
-  const barEl = /** @type {HTMLElement} */ (document.getElementById('generate-bar'));
+  const barEl = /** @type {HTMLElement} */ (document.getElementById('action-bar'));
   const generateEl = /** @type {HTMLButtonElement} */ (document.getElementById('generate-plan'));
+  const runEl = /** @type {HTMLButtonElement} */ (document.getElementById('run-task'));
 
-  /** @type {{tasks: {name: string, label: string, generating: boolean}[]}} */
+  /** @type {{tasks: {name: string, label: string, generating: boolean, running: boolean}[]}} */
   let state = { tasks: [] };
 
   /** The row being edited and what has been typed into it. Held here, never read
@@ -53,21 +54,37 @@
       }
     }
 
+    // A task that is generating or running is busy for both buttons.
     const task = state.tasks.find((t) => t.name === selected);
+    const busy = !task || task.generating || task.running;
     barEl.hidden = state.tasks.length === 0;
-    generateEl.disabled = !task || task.generating;
+    generateEl.disabled = busy;
+    runEl.disabled = busy;
+
     generateEl.title = !task
       ? 'Select a task first'
       : task.generating
         ? 'A planning session is already open for this task'
         : `Generate a plan from "${firstLine(task.label)}"`;
+    runEl.title = !task
+      ? 'Select a task first'
+      : task.generating
+        ? 'A planning session is open for this task'
+        : task.running
+          ? 'This task is already running'
+          : `Run "${firstLine(task.label)}" now, unattended`;
   }
 
   function taskRow(task) {
     // A task is addressed by file name alone — no path from here ever reaches
     // the filesystem, which is what lets the host guard every read and write.
-    const dotTitle = task.generating ? 'A planning session is open for this task' : 'Captured';
-    const dot = `<span class="task-dot${task.generating ? ' is-generating' : ''}" title="${dotTitle}"></span>`;
+    const live = task.running ? ' is-running' : task.generating ? ' is-generating' : '';
+    const dotTitle = task.running
+      ? 'A run is in flight for this task'
+      : task.generating
+        ? 'A planning session is open for this task'
+        : 'Captured';
+    const dot = `<span class="task-dot${live}" title="${dotTitle}"></span>`;
 
     const body =
       editing && editing.name === task.name
@@ -210,8 +227,16 @@
         moveTo(state.tasks.length - 1);
         break;
       case 'Enter':
-        if (task && !task.generating) {
+        if (task && !task.generating && !task.running) {
           send({ type: 'generatePlan', name: task.name });
+        }
+        break;
+      // `R` rather than Ctrl+Enter, for consistency with the manager, where R is
+      // already Run now on a plan row.
+      case 'r':
+      case 'R':
+        if (task && !task.generating && !task.running) {
+          send({ type: 'runTask', name: task.name });
         }
         break;
       case 'F2':
@@ -236,11 +261,17 @@
     }
   });
 
-  // ---------- generate ----------
+  // ---------- generate and run ----------
 
   generateEl.addEventListener('click', () => {
     if (selected) {
       send({ type: 'generatePlan', name: selected });
+    }
+  });
+
+  runEl.addEventListener('click', () => {
+    if (selected) {
+      send({ type: 'runTask', name: selected });
     }
   });
 

@@ -22,6 +22,26 @@ logic out; one of the moves also narrowed a guard.
 
 ### Added
 
+- **Run a task straight from the inbox.** The only thing a captured task could
+  become was a plan: pressing **Generate plan** opened an interactive planning
+  session, and nothing ran until a plan had been written and landed in the
+  library. That is the right route for real work, but it was the only one, so a
+  one-line chore — bump the copyright year, delete the dead `.vsix` files in the
+  repo root — meant sitting through a planning session before anything happened.
+
+  Selecting a task and pressing **Run** (or <kbd>R</kbd>, as on a plan row in the
+  manager) now runs that task's own text as the prompt, immediately and
+  unattended, in `auto` permission mode, against the folder it was captured in.
+  It is the ordinary scheduled path fired at once — a real run, with a run
+  record, a transcript and the same concurrency budget — rather than anything new.
+
+  The task stays in the inbox while the job is in flight, its dot teal and
+  pulsing, and only a completed run clears it: a run that failed, was cancelled
+  or was missed leaves the row exactly where it was, to be run again or planned
+  properly. The task is copied into the plan library first, so every scheduled
+  plan is still a library plan, and that copy is archived once it has run, like
+  any other one-shot. Nothing about **Generate plan** changes.
+
 - **Generated plans now end by recording what they changed.** A plan written by
   the **Generate plan** button said what to build and nothing about what to do
   afterwards, so an unattended overnight run finished with new behaviour in the

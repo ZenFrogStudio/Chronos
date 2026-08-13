@@ -139,7 +139,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // in-body buttons and coloured rows, none of which the TreeView API can draw.
   // The view opens the manager itself, since resolving is the only signal an
   // activity-bar click produces.
-  const taskView = new TaskView(context.extensionUri, paths, manager);
+  const taskView = new TaskView(context.extensionUri, paths, store, scheduler, manager);
 
   context.subscriptions.push(
     store,

@@ -94,6 +94,16 @@ describe('source guards', () => {
     );
   });
 
+  it('should_never_schedule_a_directly_run_task_for_a_second_go', () => {
+    // `createSeries` dates a new series an hour out. A task fired straight from
+    // the inbox is running *now*, so its series must be born spent — otherwise
+    // the same job runs again an hour later, from a plan nobody scheduled, and
+    // nothing anywhere says why.
+    const tasks = fs.readFileSync(path.join(SRC, 'tasks.ts'), 'utf8');
+
+    assert.match(tasks, /spent: true/, 'src/tasks.ts no longer marks a directly-run task spent');
+  });
+
   it('should_ship_the_codicons_the_task_view_asks_for', () => {
     // Both files, because the inbox names glyphs in two places: the rows are
     // built in JS, the Generate button is in the HTML.

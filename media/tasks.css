@@ -109,16 +109,6 @@ body.vscode-high-contrast-light {
   outline-offset: 1px;
 }
 
-/* The one action the panel is for, at full width under the list. */
-.button.is-wide {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 7px 10px;
-}
-
 .button:disabled {
   opacity: 0.5;
   cursor: default;
@@ -127,6 +117,23 @@ body.vscode-high-contrast-light {
 /* Nothing to generate from, so the hover must not suggest otherwise. */
 .button:disabled:hover {
   background: var(--action);
+}
+
+/* Secondary: the same shape without the fill, so Run does not compete with the
+   action the panel is mostly for. */
+.button.is-quiet {
+  background: none;
+  border-color: var(--border);
+  color: var(--vscode-foreground);
+}
+
+.button.is-quiet:hover {
+  background: var(--raised);
+}
+
+/* Beats `.button:disabled:hover`, which would paint a dead button teal. */
+.button.is-quiet:disabled:hover {
+  background: none;
 }
 
 /* --- The list --- */
@@ -188,7 +195,8 @@ body.vscode-high-contrast-light {
 }
 
 /* Same dot as a run: hollow and neutral for something merely captured, filled
-   amber with a halo while a planning session is open for it. */
+   amber with a halo while a planning session is open for it, teal while a run
+   fired straight from the inbox is in flight. */
 .task-dot {
   flex: none;
   position: relative;
@@ -206,13 +214,29 @@ body.vscode-high-contrast-light {
   background: var(--sodium);
 }
 
-.task-dot.is-generating::after {
+/* Teal rather than amber: sodium is spent on a plan being written, and this is a
+   run in flight, which is what teal marks everywhere else in the product. */
+.task-dot.is-running {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.task-dot.is-generating::after,
+.task-dot.is-running::after {
   content: '';
   position: absolute;
   inset: -4px;
-  border: 1px solid var(--sodium);
+  border: 1px solid;
   border-radius: 50%;
   animation: halo 1.6s ease-in-out infinite;
+}
+
+.task-dot.is-generating::after {
+  border-color: var(--sodium);
+}
+
+.task-dot.is-running::after {
+  border-color: var(--accent);
 }
 
 @keyframes halo {
@@ -266,9 +290,24 @@ body.vscode-high-contrast-light {
 }
 
 /* body is a flex column and the list takes the slack, so the bar pins under it. */
-.generate-bar {
+.action-bar {
   flex: none;
+  display: flex;
+  gap: 6px;
   margin-top: 8px;
+}
+
+/* Both buttons in the bar are the same height; only the primary one stretches. */
+.action-bar .button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 7px 10px;
+}
+
+.action-bar .button.is-wide {
+  flex: 1;
 }
 
 .empty {
@@ -279,5 +318,6 @@ body.vscode-high-contrast-light {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .task-dot.is-generating::after { animation: none; }
+  .task-dot.is-generating::after,
+  .task-dot.is-running::after { animation: none; }
 }
