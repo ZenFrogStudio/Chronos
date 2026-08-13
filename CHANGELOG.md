@@ -22,6 +22,63 @@ logic out; one of the moves also narrowed a guard.
 
 ### Added
 
+- **Chronos as an MCP server, so a coding agent can drive it.** Until now the
+  only way to get work into Chronos was to sit in VS Code and do it by hand:
+  plans written in the manager, tasks typed into the sidebar, schedules set by
+  clicking. Meanwhile the machine already runs several coding agents, every one
+  of which speaks the Model Context Protocol as a client — and from an agent's
+  point of view Chronos is exactly what MCP is for: a set of tools and some data.
+
+  The extension now ships a second bundle, `dist/mcp-server.js`, which an agent
+  spawns as a child process scoped to one project folder. It reads and writes
+  the same `.chronos` tree the editor does, so an agent working in a project can
+  capture a task, write it up as a plan, and put it on the schedule — and the
+  open window runs it that night, transcript and all, exactly as if a human had
+  scheduled it.
+
+  Eleven tools. Six read: `list_plans`, `read_plan`, `list_tasks`,
+  `list_schedule`, `list_runs` and `read_transcript`. Five write: `add_task`,
+  `add_plan`, `schedule_plan`, `update_schedule` and `unschedule`. Writing a plan
+  and scheduling it are deliberately separate, because that is the same
+  capture → generate → schedule → run pipeline the product already has, with the
+  agent standing in for the human at the first two steps.
+
+  stdio rather than HTTP: no port, no token, no auth surface, and it works with
+  VS Code closed — the writes land on disk and fire when a window next opens.
+  The server holds no state of its own; every call re-reads the folder and writes
+  back through the same read-modify-write that already lets two editor windows
+  share one schedule.
+
+  **An agent may not set `permissionMode`.** This is the one rule the whole
+  surface is built around. Chronos runs coding agents unattended, on a schedule,
+  in a real repository, and an agent that could raise its own task to
+  `bypassPermissions` would be granting itself recurring, unrestricted tool
+  access on this machine with nobody ever seeing the decision. New series get the
+  ordinary `auto` default; raising one stays a click in the manager, made by a
+  person looking at the plan. There is no `run_now` either — an agent sets a
+  time and the window fires it, which keeps every run on the single path that
+  carries the concurrency cap, the watchdogs, the retry logic and the transcript
+  machinery.
+
+  Two containment rules sit at the filesystem edge. A plan is addressed by
+  **name**, never by path, and resolved through the same check every other read
+  and write in the library goes through — so a scheduled task cannot be aimed at
+  an arbitrary file on disk. And everything written stays under the project's own
+  `.chronos`, created on the first write rather than at start-up, so an agent
+  merely listing an unconfigured project does not litter it.
+
+  The rules themselves live in `src/mcp-tools.ts`, which imports no `vscode`, no
+  `fs` and nothing from the process — the same shape as `command.ts`, the phone
+  channel's gate, and for the same reason: every refusal is a unit test rather
+  than something we hope is right. Field validation is not reimplemented there;
+  the patch goes through `edit.ts`, the manager's own validator, with the
+  `permissionMode` refusal applied on top.
+
+- **`Chronos: Copy MCP Server Config`**, a command that puts a ready-to-paste
+  client entry on the clipboard carrying the real absolute path to the server
+  bundle and the active folder. Without it, connecting an agent means going
+  looking for whichever versioned directory VS Code installed the extension into.
+
 - **A re-run button on every finished run.** The Runs panel across the bottom of
   the manager is the record of what the agent did, but a finished row offered
   only **result** and **raw log** — reading, never doing. Running the same plan
@@ -173,6 +230,25 @@ logic out; one of the moves also narrowed a guard.
   script's existence and its version lookup.
 
 ### Changed
+
+- **The schedule is re-read when it changes on disk.** The store only re-read
+  `state.json` on its own writes, which was enough while every writer was a VS
+  Code window with its own scheduler running. The MCP server is not one: it
+  writes a series and the process exits, so a task an agent scheduled would have
+  sat there unfired until somebody reloaded the window — the feature above would
+  have looked broken about half the time, and silently.
+
+  The extension now watches for external writes and reloads. The watch is on the
+  `.chronos` **directory**, filtered to `state.json`, not on the file itself:
+  writes go through a temp file and a rename, which replaces the inode and leaves
+  a file-level watch pointed at something nothing will ever write to again. That
+  is the same shape as the manager's existing plans-directory watcher, debounce
+  included. Reloading is a read, so it cannot re-trigger the watch.
+
+  A second VS Code window on the same folder gets the same benefit: schedule
+  changes made in one now appear in the other without a reload. The manager
+  repaints off its existing store subscription and the scheduler picks new series
+  up on its next 30-second tick, so nothing downstream needed changing.
 
 - **A task in the sidebar shows in full instead of being cut off mid-sentence.**
   The row was built from the first non-empty line of the task file and clipped at

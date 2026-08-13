@@ -10,7 +10,7 @@ import * as library from './library';
 import { log, logConsolidation } from './log';
 import { ChronosPaths } from './roots';
 import { Scheduler } from './scheduler';
-import { createSeries, defaultCwd } from './series';
+import { createSeries, SeriesDefaults } from './series';
 import { coerceSetting, SettingGroup, settingGroups } from './settings';
 import { Store } from './store';
 import { AgentId, TaskSeries } from './types';
@@ -172,7 +172,7 @@ export class Manager implements vscode.Disposable {
       // folder containing the file, which is not necessarily the folder whose
       // library the copy lands in. A plan dropped in from another project keeps
       // running against that project.
-      const series = createSeries(plan.filePath, { cwd: defaultCwd(filePath) });
+      const series = createSeries(plan.filePath, seriesDefaults(filePath));
       await this.store.addSeries(series);
       log.info(`copied ${filePath} into the library as ${plan.name} and scheduled it (cwd ${series.cwd})`);
       scheduled.push(plan.title);
@@ -293,7 +293,7 @@ export class Manager implements vscode.Disposable {
         );
         for (const file of dropped) {
           const plan = library.createPlan(dir, path.basename(file.name, '.md'), file.text);
-          await this.store.addSeries(createSeries(plan.filePath));
+          await this.store.addSeries(createSeries(plan.filePath, seriesDefaults(plan.filePath)));
           log.info(`copied a dropped file into the library and scheduled ${plan.name}`);
           scheduled.push(plan.title);
         }
@@ -379,7 +379,8 @@ export class Manager implements vscode.Disposable {
         return this.switchFolder(message.folder);
 
       case 'schedulePlan': {
-        const series = createSeries(library.planPath(dir, message.name));
+        const filePath = library.planPath(dir, message.name);
+        const series = createSeries(filePath, seriesDefaults(filePath));
         await this.store.addSeries(series);
         log.info(`scheduled ${series.fileName} for ${series.nextRunAt}`);
         return;
@@ -688,6 +689,36 @@ export class Manager implements vscode.Disposable {
       .replaceAll('{{codiconUri}}', mediaUri('codicon.css'))
       .replaceAll('{{scriptUri}}', mediaUri('manager.js'));
   }
+}
+
+/**
+ * Working directory for the agent process. Prefers the workspace folder that
+ * actually contains the plan file, since a plan may live outside the project it
+ * targets.
+ *
+ * It lives here rather than in `series.ts` because it is the one genuinely
+ * `vscode`-shaped decision in creating a series, and `series.ts` is loaded by
+ * the MCP server process, which has no workspace to ask.
+ */
+export function defaultCwd(filePath: string): string {
+  const folders = vscode.workspace.workspaceFolders;
+  if (!folders?.length) {
+    return path.dirname(filePath);
+  }
+  const owner = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(filePath));
+  return (owner ?? folders[0]).uri.fsPath;
+}
+
+/**
+ * The two defaults `createSeries` cannot work out for itself, read from the
+ * editor. `series.ts` used to reach for `chronos.maxRetries` directly; it no
+ * longer imports `vscode` at all, so the reading happens here.
+ */
+export function seriesDefaults(filePath: string): SeriesDefaults {
+  return {
+    cwd: defaultCwd(filePath),
+    maxRetries: vscode.workspace.getConfiguration('chronos').get<number>('maxRetries', 3)
+  };
 }
 
 /**

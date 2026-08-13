@@ -248,6 +248,61 @@ describe('source guards', () => {
     assert.ok(!js.includes('removeSeries'), 'media/manager.js can still remove a series');
   });
 
+  it('should_declare_permission_mode_on_both_mcp_write_tools_so_it_can_be_refused', () => {
+    // `mcp-tools.ts` refuses `permissionMode`, and its tests prove it does. But
+    // zod strips a key the schema does not declare, so dropping this one line
+    // from either tool means the argument never reaches that refusal: the call
+    // succeeds, the task quietly stays `auto`, and the agent reports back that
+    // it raised the permissions. Safe, and completely misleading — which is
+    // worse than an error, and invisible to every unit test.
+    const server = fs.readFileSync(path.join(SRC, 'mcp-server.ts'), 'utf8');
+
+    const declarations = server.match(/permissionMode: permissionModeArg/g) ?? [];
+    assert.equal(
+      declarations.length,
+      2,
+      'schedule_plan and update_schedule must both declare permissionMode so the gate sees it'
+    );
+
+    // The declaration is only half of it: the value has to be forwarded to the
+    // gate as well, or it is parsed and then dropped on the floor.
+    assert.equal(
+      (server.match(/'permissionMode'/g) ?? []).length,
+      2,
+      'both write tools must forward permissionMode to mcp-tools.ts'
+    );
+  });
+
+  it('should_never_write_to_stdout_from_the_mcp_server', () => {
+    // stdout *is* the JSON-RPC transport. One `console.log` anywhere on this
+    // side interleaves with a reply and corrupts the protocol mid-session —
+    // the client sees a parse error, not a message it can trace to a log line.
+    // stderr is the channel; `note()` is the only way to it.
+    const server = fs.readFileSync(path.join(SRC, 'mcp-server.ts'), 'utf8');
+
+    for (const banned of ['console.log(', 'console.info(', 'process.stdout.write(']) {
+      assert.ok(!server.includes(banned), `src/mcp-server.ts calls ${banned} — use note()`);
+    }
+  });
+
+  it('should_keep_the_mcp_server_free_of_vscode', () => {
+    // The server is a plain Node process an agent spawns; there is no extension
+    // host to provide `vscode`. An import of it — or of any module that reaches
+    // it — builds fine and then throws MODULE_NOT_FOUND at the client's first
+    // connection attempt. esbuild catches the direct case, this catches the
+    // transitive one before the build does.
+    const reachable = ['mcp-server.ts', 'mcp-tools.ts', 'series.ts', 'library.ts', 'roots.ts',
+      'state-file.ts', 'edit.ts', 'recurrence.ts', 'types.ts', 'time.ts', 'agents.ts', 'migrate.ts'];
+
+    for (const name of reachable) {
+      const source = fs.readFileSync(path.join(SRC, name), 'utf8');
+      assert.ok(
+        !/from '(vscode)'|require\('vscode'\)/.test(source),
+        `src/${name} imports vscode, so the MCP server cannot load it`
+      );
+    }
+  });
+
   it('should_ship_a_sash_element_for_every_sash_rule', () => {
     // The dividers are found by id, styled by class and never rendered by JS, so
     // a renamed id leaves the CSS styling nothing and the drag silently dead.

@@ -45,6 +45,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   const store = await Store.create(paths().state);
   const runner = new Runner(store, () => paths().logs, () => paths().results);
+  // Picks up schedules written by anything that is not this window — the MCP
+  // server an agent spawned, or a second editor window on the same folder.
+  const stateWatcher = new StateWatcher(paths, store);
 
   /** A one-shot that has run has no future, so its file leaves the library. */
   const retire = async (): Promise<void> =>
@@ -117,6 +120,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     await retire();
 
     manager.restartWatching();
+    stateWatcher.restart();
     manager.post();
     await scheduler.reclaim();
     log.info(`switched to ${folder}`);
@@ -141,6 +145,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // activity-bar click produces.
   const taskView = new TaskView(context.extensionUri, paths, store, scheduler, manager);
 
+  stateWatcher.restart();
+
   context.subscriptions.push(
     store,
     runner,
@@ -148,6 +154,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     manager,
     status,
     taskView,
+    stateWatcher,
     vscode.window.registerWebviewViewProvider(TaskView.viewType, taskView),
     vscode.window.registerWebviewPanelSerializer(Manager.viewType, {
       // Restores the tab after a window reload instead of holding it in memory.
@@ -181,7 +188,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       }
     ),
     vscode.commands.registerCommand('chronos.showLogs', () => log.show()),
-    vscode.commands.registerCommand('chronos.addTask', () => taskView.addTask())
+    vscode.commands.registerCommand('chronos.addTask', () => taskView.addTask()),
+    vscode.commands.registerCommand('chronos.copyMcpConfig', () =>
+      copyMcpConfig(context, paths().folder)
+    )
   );
 
   await scheduler.start();
@@ -218,6 +228,94 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
 export function deactivate(): void {
   log.info('Chronos deactivating');
+}
+
+///////////////////////////*Schedules written from outside*////////////////////////////
+
+/**
+ * Reloads the store when `state.json` changes underneath this window.
+ *
+ * The store only re-read on its own writes, which was enough while every writer
+ * was an editor window with its own scheduler. The MCP server is not: an agent
+ * schedules a task and the process exits, so without this the series would sit
+ * on disk unfired until someone reloaded the window. A second editor window on
+ * the same folder gets the same benefit for free.
+ *
+ * The watch is on the `.chronos` **directory**, filtered to the file — not on
+ * the file itself. `writeState` writes a temp file and renames it over the
+ * target, which replaces the inode and leaves a file-level watch pointed at
+ * something nothing will ever write to again. `Manager.restartWatching` watches
+ * its plans directory the same way, debounce included.
+ *
+ * Reloading is a read, so it cannot re-trigger this watcher — a plain debounce
+ * is enough, and no window suppressing this window's own writes is needed.
+ */
+class StateWatcher implements vscode.Disposable {
+  private watcher: fs.FSWatcher | undefined;
+  private debounce: NodeJS.Timeout | undefined;
+
+  constructor(
+    private readonly paths: () => ChronosPaths,
+    private readonly store: Store
+  ) {}
+
+  restart(): void {
+    this.stop();
+    const resolved = this.paths();
+    const stateFile = path.basename(resolved.state);
+
+    try {
+      this.watcher = fs.watch(resolved.root, (_event, filename) => {
+        if (filename && path.basename(String(filename)) !== stateFile) {
+          return; // The same directory holds the lock, the logs and the plans.
+        }
+        clearTimeout(this.debounce);
+        this.debounce = setTimeout(() => this.store.reload(), 150);
+      });
+    } catch (err) {
+      log.warn(`could not watch the schedule file: ${String(err)}`);
+    }
+  }
+
+  dispose(): void {
+    this.stop();
+  }
+
+  private stop(): void {
+    clearTimeout(this.debounce);
+    this.watcher?.close();
+    this.watcher = undefined;
+  }
+}
+
+/**
+ * Puts a ready-to-paste MCP client entry on the clipboard.
+ *
+ * Configuring an agent needs the absolute path to `dist/mcp-server.js` inside
+ * whichever versioned folder VS Code installed this extension into, which is not
+ * something anyone should have to go looking for. `extensionUri` is the only
+ * place that path is known for certain.
+ */
+async function copyMcpConfig(
+  context: vscode.ExtensionContext,
+  folder: string
+): Promise<void> {
+  const serverPath = vscode.Uri.joinPath(context.extensionUri, 'dist', 'mcp-server.js').fsPath;
+  const snippet = JSON.stringify(
+    {
+      mcpServers: {
+        chronos: { command: 'node', args: [serverPath, '--folder', folder] }
+      }
+    },
+    null,
+    2
+  );
+
+  await vscode.env.clipboard.writeText(snippet);
+  void vscode.window.showInformationMessage(
+    `Copied the Chronos MCP config for ${path.basename(folder)}. Paste it into your agent's ` +
+      'MCP settings, or run: claude mcp add chronos -- node "<path>" --folder "<folder>"'
+  );
 }
 
 /**

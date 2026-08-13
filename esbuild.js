@@ -34,27 +34,46 @@ const problemMatcherLog = {
   }
 };
 
+const shared = {
+  bundle: true,
+  format: 'cjs',
+  platform: 'node',
+  target: 'node20',
+  sourcemap: !production,
+  minify: production,
+  logLevel: 'silent',
+  plugins: [problemMatcherLog]
+};
+
 async function main() {
-  const ctx = await esbuild.context({
-    entryPoints: ['src/extension.ts'],
-    bundle: true,
-    format: 'cjs',
-    platform: 'node',
-    target: 'node20',
-    outfile: 'dist/extension.js',
-    external: ['vscode'],
-    sourcemap: !production,
-    minify: production,
-    logLevel: 'silent',
-    plugins: [problemMatcherLog]
-  });
+  const contexts = await Promise.all([
+    esbuild.context({
+      ...shared,
+      entryPoints: ['src/extension.ts'],
+      outfile: 'dist/extension.js',
+      external: ['vscode']
+    }),
+    /**
+     * The MCP server: a plain Node process an agent spawns, bundled separately
+     * because it is a second entry point rather than a second copy of the first.
+     *
+     * Deliberately *no* `external: ['vscode']`. There is no extension host here
+     * to provide that module, so if this build ever resolves it, something on
+     * this side has imported the wrong thing and the failure is the check.
+     */
+    esbuild.context({
+      ...shared,
+      entryPoints: ['src/mcp-server.ts'],
+      outfile: 'dist/mcp-server.js'
+    })
+  ]);
 
   if (watch) {
-    await ctx.watch();
+    await Promise.all(contexts.map((ctx) => ctx.watch()));
     console.log('[chronos] watching...');
   } else {
-    await ctx.rebuild();
-    await ctx.dispose();
+    await Promise.all(contexts.map((ctx) => ctx.rebuild()));
+    await Promise.all(contexts.map((ctx) => ctx.dispose()));
   }
 }
 

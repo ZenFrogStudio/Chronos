@@ -1,13 +1,16 @@
-import { randomUUID } from 'crypto';
 import * as vscode from 'vscode';
 import { pruneRuns } from './history';
 import { log } from './log';
+import { newId } from './series';
 import { readState, updateState } from './state-file';
 import { ChronosState, SCHEMA_VERSION, TaskRun, TaskSeries } from './types';
 
-export function newId(): string {
-  return randomUUID();
-}
+/**
+ * Re-exported rather than defined here: `series.ts` is deliberately `vscode`-free
+ * so the MCP server can load it, and this module is not. Every existing importer
+ * of `newId` keeps working unchanged.
+ */
+export { newId };
 
 export class Store {
   private readonly emitter = new vscode.EventEmitter<void>();
@@ -34,6 +37,23 @@ export class Store {
   async retarget(file: string): Promise<void> {
     this.file = file;
     this.state = load(file);
+    this.emitter.fire();
+  }
+
+  /**
+   * Re-reads the current folder's state, for a write this window did not make.
+   *
+   * The store only re-reads on its own writes, which was enough while every
+   * writer was a VS Code window with its own scheduler. The MCP server is not:
+   * it writes a series and then does nothing, so without this a task an agent
+   * scheduled would sit on disk unfired until the window was reloaded. Called
+   * from the `state.json` watcher in `extension.ts`.
+   *
+   * `retarget` for the same file, minus the folder-switch logging — a reload
+   * happens on every external write and would otherwise fill the log.
+   */
+  reload(): void {
+    this.state = readState(this.file).state;
     this.emitter.fire();
   }
 

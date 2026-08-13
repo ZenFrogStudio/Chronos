@@ -2,7 +2,7 @@
   "name": "chronos",
   "displayName": "Chronos",
   "description": "Schedule Claude Code tasks from Markdown plan files.",
-  "version": "0.8.0-rc.47",
+  "version": "0.8.0-rc.48",
   "publisher": "Z3n",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -69,6 +69,10 @@
         "command": "chronos.selectFolder",
         "title": "Chronos: Select Folder",
         "icon": "$(folder)"
+      },
+      {
+        "command": "chronos.copyMcpConfig",
+        "title": "Chronos: Copy MCP Server Config"
       }
     ],
     "menus": {
@@ -247,5 +251,9 @@
     "@vscode/codicons": "^0.0.46-24",
     "esbuild": "^0.28.1",
     "typescript": "^5.5.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/server": "^2.0.0",
+    "zod": "^4.4.3"
   }
 }

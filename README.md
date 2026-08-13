@@ -181,6 +181,57 @@ Transcripts live in `.chronos/results` inside the folder by default; set
 manager opens them in your file manager. Unlike raw logs, they are never
 deleted automatically.
 
+## Connecting an agent
+
+Chronos speaks the Model Context Protocol, so any MCP-capable coding agent —
+Claude Code, Hermes, Cursor — can drive the authoring half of the pipeline
+itself: capture a task, write it up as a plan, and put it on the schedule. The
+open VS Code window picks the schedule up and runs it that night, with the
+transcript landing in `.chronos/results` exactly as if you had scheduled it by
+hand.
+
+The server is a small Node process the agent spawns, scoped to one project
+folder. No ports, no tokens, and it works with VS Code closed — the writes land
+on disk and fire when a window next opens.
+
+Run **Chronos: Copy MCP Server Config** from the command palette to get the
+absolute paths for your install on the clipboard, then register it:
+
+```bash
+claude mcp add chronos -- node "<ext>/dist/mcp-server.js" --folder "<project>"
+
+hermes mcp add chronos --command node --args "<ext>/dist/mcp-server.js" --folder "<project>"
+```
+
+For Hermes, `--args` must come last — everything after it is passed to the
+server rather than read as a Hermes flag. `hermes mcp test chronos` confirms the
+connection and lists the tools in one command.
+
+Eleven tools, six that read and five that write:
+
+| | |
+|---|---|
+| `list_plans` `read_plan` | The plan library |
+| `list_tasks` | The capture inbox |
+| `list_schedule` `list_runs` `read_transcript` | What is scheduled, and what happened |
+| `add_task` `add_plan` | Capture and authoring |
+| `schedule_plan` `update_schedule` `unschedule` | The schedule |
+
+**An agent cannot set a task's permission mode.** New tasks get the ordinary
+`auto` default, and raising one to `bypassPermissions` stays a decision you make
+in the manager, looking at a plan you have read — otherwise an agent could grant
+itself unattended, recurring, unrestricted tool access on your machine without
+you ever seeing it. Asking for it over MCP is refused, with a message saying
+where the setting lives.
+
+There is also no "run now" tool. An agent sets a time and the window fires it,
+which keeps every run on the one path that has the concurrency cap, the
+watchdogs, the retry logic and the transcript machinery.
+
+Plans are addressed by name rather than by path, so a scheduled task can only
+ever point at a file inside the library, and everything written goes under the
+project's own `.chronos`.
+
 ## Read this before scheduling anything unattended
 
 Chronos runs an AI agent **while you are away from the machine**. Three things
@@ -222,6 +273,10 @@ instants are derived from the rule, never accumulated.
 **Crash recovery.** A run left `running` because VS Code closed mid-flight is
 reconciled to failed on next launch and retried, rather than holding its
 concurrency slot forever.
+
+**The schedule is re-read when it changes on disk.** A task scheduled by a
+connected agent, or by a second VS Code window on the same folder, appears
+without reloading anything and fires on the next 30-second tick.
 
 **Chronos only runs while VS Code is open.** It is an extension, not a daemon.
 Tasks due while VS Code is closed are caught up (or marked missed) at next

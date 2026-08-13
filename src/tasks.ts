@@ -510,20 +510,26 @@ export class TaskView implements vscode.WebviewViewProvider, vscode.Disposable {
     // `consolidate`'s invariant true: a series may only point into the library.
     const plan = library.importFile(paths.plans, task.filePath);
 
-    const series = createSeries(plan.filePath, {
-      // The folder the task was captured in is the folder it runs against — the
-      // same rule the planning session uses.
-      cwd: paths.folder,
-      // Stated rather than left to the default, because this is the whole of what
-      // "run it in auto mode" means and it should not move if the default does.
-      permissionMode: 'auto',
-      // `createSeries` dates a new series an hour out. Without this the job would
-      // run now *and* again in an hour, from a plan the user never scheduled.
-      spent: true,
-      // You pressed Run and are watching. A retry an hour later, of a prompt that
-      // was never reviewed as a plan, is not what that button promised.
-      maxRetries: 0
-    });
+    const series = createSeries(
+      plan.filePath,
+      {
+        // The folder the task was captured in is the folder it runs against —
+        // the same rule the planning session uses.
+        cwd: paths.folder,
+        // You pressed Run and are watching. A retry an hour later, of a prompt
+        // that was never reviewed as a plan, is not what that button promised.
+        maxRetries: 0
+      },
+      {
+        // Stated rather than left to the default, because this is the whole of
+        // what "run it in auto mode" means and it should not move if the
+        // default does.
+        permissionMode: 'auto',
+        // `createSeries` dates a new series an hour out. Without this the job
+        // would run now *and* again in an hour, from a plan nobody scheduled.
+        spent: true
+      }
+    );
     await this.store.addSeries(series);
 
     // Before `runNow`, so the first store change it causes already finds the link.
