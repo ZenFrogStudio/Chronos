@@ -27,6 +27,7 @@ describe('pathsFor', () => {
     assert.equal(paths.plans, path.join(root, 'plans'));
     assert.equal(paths.tasks, path.join(root, 'tasks'));
     assert.equal(paths.pending, path.join(root, '.pending'));
+    assert.equal(paths.questions, path.join(root, 'questions'));
     assert.equal(paths.results, path.join(root, 'results'));
     assert.equal(paths.logs, path.join(root, 'logs'));
     assert.equal(paths.archive, path.join(root, 'archive'));
@@ -51,7 +52,14 @@ describe('ensureRoot', () => {
 
     ensureRoot(paths);
 
-    for (const dir of [paths.root, paths.plans, paths.tasks, paths.results, paths.logs]) {
+    for (const dir of [
+      paths.root,
+      paths.plans,
+      paths.tasks,
+      paths.questions,
+      paths.results,
+      paths.logs
+    ]) {
       assert.ok(fs.statSync(dir).isDirectory(), `${dir} was not created`);
     }
   });

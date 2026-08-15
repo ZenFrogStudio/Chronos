@@ -47,11 +47,11 @@ A row's dot says what is happening to it — hollow while it is only captured,
 amber and pulsing while a planning session is open for it.
 
 Press **Generate plan** (the lightbulb on a task row) and Chronos opens a
-terminal running `claude` in plan mode, already working from your task. Claude
-can ask you anything it needs before committing to an approach — that is why the
-session is interactive rather than headless. Approve the plan and it is written
-into your library as a real plan file, the task disappears, and the manager
-opens with the new plan selected and ready to schedule:
+terminal running `claude`, already working from your task. Claude can ask you
+anything it needs before committing to an approach — that is why the session is
+interactive rather than headless. Approve the plan and it is written into your
+library as a real plan file, the task disappears, and the manager opens with the
+new plan selected and ready to schedule:
 
 ```
 capture → generate → schedule → run
@@ -59,6 +59,11 @@ capture → generate → schedule → run
 
 Back out at any point — Escape, closing the terminal, never approving — and
 nothing is created; the task stays exactly where it was.
+
+You do not have to be at that terminal. By default the session's questions come
+out through Chronos's MCP server, so you can answer them — and approve the
+finished plan — from Claude Desktop or from your phone; see
+[Answering a planning session from somewhere else](#answering-a-planning-session-from-somewhere-else).
 
 Every generated plan ends with a closing step: bump the project version, add a
 matching changelog entry, and commit the result to git. That is what stops an
@@ -207,7 +212,7 @@ For Hermes, `--args` must come last — everything after it is passed to the
 server rather than read as a Hermes flag. `hermes mcp test chronos` confirms the
 connection and lists the tools in one command.
 
-Eleven tools, six that read and five that write:
+Fifteen tools, seven that read and eight that write:
 
 | | |
 |---|---|
@@ -216,6 +221,8 @@ Eleven tools, six that read and five that write:
 | `list_schedule` `list_runs` `read_transcript` | What is scheduled, and what happened |
 | `add_task` `add_plan` | Capture and authoring |
 | `schedule_plan` `update_schedule` `unschedule` | The schedule |
+| `list_questions` `answer_question` | Planning sessions waiting on you |
+| `ask_user` `submit_plan` | Used *by* a planning session — see below |
 
 **An agent cannot set a task's permission mode.** New tasks get the ordinary
 `auto` default, and raising one to `bypassPermissions` stays a decision you make
@@ -231,6 +238,37 @@ watchdogs, the retry logic and the transcript machinery.
 Plans are addressed by name rather than by path, so a scheduled task can only
 ever point at a file inside the library, and everything written goes under the
 project's own `.chronos`.
+
+### Answering a planning session from somewhere else
+
+**Generate plan** normally needs you at the keyboard: the session asks its
+questions in that terminal, and waits there. With `chronos.remoteQuestions` on —
+it is on by default — the questions come out through this MCP server instead, so
+you can answer them from Claude Desktop, or from a phone driving Claude Desktop
+on the same machine.
+
+Register the server for the project in whichever client you want to answer from
+(**Chronos: Copy MCP Server Config** gives you the paths). Then press **Generate
+plan** and walk away. Ask the answering agent what Chronos is waiting on:
+
+- `list_questions` shows each open question, what the session is asking about,
+  and which task it came from.
+- `answer_question` records your answers, and the waiting session picks them up
+  within a second or two and carries on.
+
+Both prompts travel this way, not just the first: the session sends its finished
+plan back as a question too, so approving it is the same one-line reply. On
+approval it calls `submit_plan`, the plan lands in your library, and the task
+clears — the same ending as if you had sat through it.
+
+The session gets `ask_user` and `submit_plan` and nothing else. It cannot
+schedule anything, which matters because nobody is watching it.
+
+Nothing leaves the machine. A question is a file in `.chronos/questions` and an
+answer is the same file written back, so the two ends never need a port, a token
+or an account between them. Unanswered questions are swept after a week. Turn
+`chronos.remoteQuestions` off and **Generate plan** behaves exactly as it always
+has, asking in the terminal and nowhere else.
 
 ## Read this before scheduling anything unattended
 

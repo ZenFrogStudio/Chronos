@@ -292,7 +292,8 @@ describe('source guards', () => {
     // connection attempt. esbuild catches the direct case, this catches the
     // transitive one before the build does.
     const reachable = ['mcp-server.ts', 'mcp-tools.ts', 'series.ts', 'library.ts', 'roots.ts',
-      'state-file.ts', 'edit.ts', 'recurrence.ts', 'types.ts', 'time.ts', 'agents.ts', 'migrate.ts'];
+      'state-file.ts', 'edit.ts', 'recurrence.ts', 'types.ts', 'time.ts', 'agents.ts', 'migrate.ts',
+      'questions.ts'];
 
     for (const name of reachable) {
       const source = fs.readFileSync(path.join(SRC, name), 'utf8');
@@ -301,6 +302,55 @@ describe('source guards', () => {
         `src/${name} imports vscode, so the MCP server cannot load it`
       );
     }
+  });
+
+  it('should_register_every_tool_a_planning_session_is_allowed_to_call', () => {
+    // `ASK_TOOLS` is both the `--allowedTools` allowlist and the wording of the
+    // instruction. Rename a tool in `mcp-server.ts` without changing it and the
+    // allowlist points at nothing: the session calls a tool that does not
+    // exist, or sits on a permission prompt nobody is there to answer, with
+    // nothing in any log to say why. No unit test can see that — the two sides
+    // are a string constant and a registration in another process.
+    const server = fs.readFileSync(path.join(SRC, 'mcp-server.ts'), 'utf8');
+    const launch = fs.readFileSync(path.join(SRC, 'launch.ts'), 'utf8');
+
+    const names = launch.match(/export const ASK_TOOLS = \[([^\]]*)\]/)?.[1];
+    assert.ok(names, 'src/launch.ts no longer declares ASK_TOOLS');
+
+    const tools = [...names.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
+    assert.deepEqual(tools, ['ask_user', 'submit_plan'], 'ASK_TOOLS changed — check both sides');
+
+    for (const tool of tools) {
+      assert.match(
+        server,
+        new RegExp(`registerTool\\(\\s*'${tool}'`),
+        `src/mcp-server.ts never registers ${tool}, so the allowlist points at nothing`
+      );
+    }
+  });
+
+  it('should_keep_the_ask_server_name_the_same_on_both_sides_of_the_spawn', () => {
+    // `launch.ts` puts this name into every allowlisted tool id; `tasks.ts`
+    // writes the `mcp.json` key the CLI matches them against. A mismatch means
+    // the tools are registered under one name and allowlisted under another.
+    const launch = fs.readFileSync(path.join(SRC, 'launch.ts'), 'utf8');
+    const tasks = fs.readFileSync(path.join(SRC, 'tasks.ts'), 'utf8');
+
+    assert.match(launch, /export const ASK_SERVER = 'chronos-ask'/);
+    assert.ok(
+      tasks.includes('[ASK_SERVER]:'),
+      'src/tasks.ts must key its mcp.json off ASK_SERVER rather than a literal'
+    );
+  });
+
+  it('should_never_let_a_routed_planning_session_reach_the_scheduler', () => {
+    // The session runs unattended by design. `--ask-only` is what withholds
+    // `schedule_plan` and the rest of the write surface from it; drop it from
+    // the spawn and an overnight planning session could put its own work on the
+    // schedule, in a mode nobody chose.
+    const tasks = fs.readFileSync(path.join(SRC, 'tasks.ts'), 'utf8');
+
+    assert.ok(tasks.includes("'--ask-only'"), 'src/tasks.ts no longer spawns with --ask-only');
   });
 
   it('should_ship_a_sash_element_for_every_sash_rule', () => {

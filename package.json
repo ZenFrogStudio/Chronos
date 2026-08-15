@@ -2,7 +2,7 @@
   "name": "chronos",
   "displayName": "Chronos",
   "description": "Schedule Claude Code tasks from Markdown plan files.",
-  "version": "0.8.0-rc.48",
+  "version": "0.8.0-rc.49",
   "publisher": "Z3n",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -182,6 +182,11 @@
           "type": "boolean",
           "default": true,
           "markdownDescription": "Ask every generated plan to end by committing the result to git. Without it an unattended run finishes with an untracked working tree and no record of what changed. Commit only — nothing is pushed. Affects plans Chronos generates from now on; plans already in your library are untouched."
+        },
+        "chronos.remoteQuestions": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Let a planning session ask you its questions through Chronos instead of through the terminal it is running in, so you can answer them from another device — Claude Desktop on this machine, or a phone driving it. Press **Generate plan** and walk away: the session posts its questions, waits, picks up your answers, and delivers the finished plan when you approve it. Nothing leaves this machine; the questions are files in `.chronos/questions`. Turn this off to go back to answering in the terminal, which is the only place the session will ask."
         },
         "chronos.showTerminalOnRun": {
           "type": "boolean",

@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
   PERMISSION_REFUSAL,
+  planAnswers,
+  planQuestion,
   planSeriesOverrides,
   planSeriesUpdate,
   planTiming,
@@ -9,6 +11,7 @@ import {
   Timing,
   Verdict
 } from '../src/mcp-tools';
+import { QuestionFile } from '../src/questions';
 import { TaskSeries } from '../src/types';
 
 /**
@@ -214,6 +217,225 @@ describe('mcp schedule overrides', () => {
 
   it('should_accept_an_empty_override_set', () => {
     assert.deepEqual(valueOf(planSeriesOverrides({})), {});
+  });
+});
+
+describe('mcp asking a question', () => {
+  const one = [{ question: 'Should it repeat by the hour as well?' }];
+
+  it('should_accept_a_summary_and_a_question', () => {
+    const planned = valueOf(planQuestion({ summary: 'Two things first.', questions: one }));
+
+    assert.equal(planned.summary, 'Two things first.');
+    assert.deepEqual(planned.questions, [
+      { id: 'q1', question: 'Should it repeat by the hour as well?' }
+    ]);
+  });
+
+  it('should_number_the_questions_itself_rather_than_trusting_the_caller', () => {
+    // Two questions sharing an id, or one that collides with nothing, turns
+    // answering into guesswork at the far end — where there is a phone and no
+    // way to go back and look.
+    const planned = valueOf(
+      planQuestion({
+        summary: 'A few things.',
+        questions: [{ question: 'One?', id: 'q9' }, { question: 'Two?', id: 'q9' }]
+      })
+    );
+
+    assert.deepEqual(planned.questions.map((q) => q.id), ['q1', 'q2']);
+  });
+
+  it('should_trim_the_summary_and_the_questions', () => {
+    const planned = valueOf(
+      planQuestion({ summary: '  Two things.  ', questions: [{ question: '  Which one?  ' }] })
+    );
+
+    assert.equal(planned.summary, 'Two things.');
+    assert.equal(planned.questions[0].question, 'Which one?');
+  });
+
+  it('should_refuse_an_empty_question_list', () => {
+    // A call with nothing in it would post a question the user can look at and
+    // not answer, and the session would wait on it forever.
+    assert.match(reasonOf(planQuestion({ summary: 'Hello', questions: [] })), /at least one/);
+  });
+
+  it('should_refuse_a_missing_question_list', () => {
+    assert.match(reasonOf(planQuestion({ summary: 'Hello' })), /at least one/);
+  });
+
+  it('should_refuse_eleven_questions', () => {
+    const questions = Array.from({ length: 11 }, (_, n) => ({ question: `Question ${n}?` }));
+
+    assert.match(reasonOf(planQuestion({ summary: 'Lots', questions })), /at most 10/);
+  });
+
+  it('should_accept_ten_questions', () => {
+    const questions = Array.from({ length: 10 }, (_, n) => ({ question: `Question ${n}?` }));
+
+    assert.equal(valueOf(planQuestion({ summary: 'Lots', questions })).questions.length, 10);
+  });
+
+  it('should_refuse_a_summary_that_is_missing_or_blank', () => {
+    for (const summary of [undefined, '', '   ', 42]) {
+      assert.match(reasonOf(planQuestion({ summary, questions: one })), /summary/);
+    }
+  });
+
+  it('should_refuse_an_over_long_summary', () => {
+    const verdict = planQuestion({ summary: 'x'.repeat(2001), questions: one });
+
+    assert.match(reasonOf(verdict), /2000 characters/);
+  });
+
+  it('should_refuse_an_over_long_question', () => {
+    const verdict = planQuestion({
+      summary: 'Fine',
+      questions: [{ question: 'y'.repeat(1001) }]
+    });
+
+    assert.match(reasonOf(verdict), /1000 characters/);
+  });
+
+  it('should_refuse_a_question_with_no_text', () => {
+    assert.match(reasonOf(planQuestion({ summary: 'Fine', questions: [{}] })), /Question 1/);
+  });
+
+  it('should_name_which_question_was_the_problem', () => {
+    const verdict = planQuestion({
+      summary: 'Fine',
+      questions: [{ question: 'One?' }, { question: 'Two?' }, { question: '  ' }]
+    });
+
+    assert.match(reasonOf(verdict), /Question 3/);
+  });
+
+  it('should_carry_options_through', () => {
+    const planned = valueOf(
+      planQuestion({
+        summary: 'Fine',
+        questions: [{ question: 'Which engine?', options: ['claude', 'opencode'] }]
+      })
+    );
+
+    assert.deepEqual(planned.questions[0].options, ['claude', 'opencode']);
+  });
+
+  it('should_leave_options_off_a_free_text_question', () => {
+    // An empty list and an absent one mean the same thing, and neither should
+    // reach the answering agent as an empty shortlist.
+    for (const options of [undefined, []]) {
+      const planned = valueOf(
+        planQuestion({ summary: 'Fine', questions: [{ question: 'What name?', options }] })
+      );
+
+      assert.equal('options' in planned.questions[0], false, JSON.stringify(options));
+    }
+  });
+
+  it('should_refuse_more_than_six_options', () => {
+    const options = Array.from({ length: 7 }, (_, n) => `option ${n}`);
+    const verdict = planQuestion({ summary: 'Fine', questions: [{ question: 'Which?', options }] });
+
+    assert.match(reasonOf(verdict), /at most 6 options/);
+  });
+
+  it('should_refuse_an_over_long_or_empty_option', () => {
+    for (const option of ['z'.repeat(201), '']) {
+      const verdict = planQuestion({
+        summary: 'Fine',
+        questions: [{ question: 'Which?', options: [option] }]
+      });
+
+      assert.match(reasonOf(verdict), /Question 1/);
+    }
+  });
+
+  it('should_refuse_something_that_is_not_a_question_at_all', () => {
+    for (const raw of [undefined, null, 'hello', 7]) {
+      assert.ok(!planQuestion(raw).ok, JSON.stringify(raw));
+    }
+  });
+});
+
+describe('mcp answering a question', () => {
+  const file = (): QuestionFile => ({
+    id: 'abcdef012345',
+    askedAt: '2026-08-13T09:00:00.000Z',
+    summary: 'Two things first.',
+    questions: [
+      { id: 'q1', question: 'Hourly too?' },
+      { id: 'q2', question: 'Which engine?', options: ['claude', 'opencode'] }
+    ]
+  });
+
+  const both = [
+    { id: 'q1', answer: 'Yes' },
+    { id: 'q2', answer: 'claude' }
+  ];
+
+  it('should_accept_an_answer_to_every_question', () => {
+    assert.deepEqual(valueOf(planAnswers(file(), both)), both);
+  });
+
+  it('should_return_the_answers_in_the_order_they_were_asked', () => {
+    // So the session reads them alongside its own questions rather than in
+    // whatever order the answering agent happened to use.
+    const answers = valueOf(planAnswers(file(), [both[1], both[0]]));
+
+    assert.deepEqual(answers.map((a) => a.id), ['q1', 'q2']);
+  });
+
+  it('should_refuse_an_answer_to_a_question_that_was_never_asked', () => {
+    const verdict = planAnswers(file(), [...both, { id: 'q7', answer: 'Sure' }]);
+
+    assert.match(reasonOf(verdict), /q7/);
+  });
+
+  it('should_list_the_questions_that_were_asked_when_it_refuses_an_unknown_id', () => {
+    // The caller is another agent, and this is the only thing it has to go on.
+    const verdict = planAnswers(file(), [{ id: 'q7', answer: 'Sure' }]);
+
+    assert.match(reasonOf(verdict), /q1, q2/);
+  });
+
+  it('should_refuse_a_partial_answer_and_name_what_is_missing', () => {
+    // A question can only be answered once, so recording half would strand the
+    // waiting session on the half it still needs, with no way to ask again.
+    const verdict = planAnswers(file(), [both[0]]);
+
+    assert.match(reasonOf(verdict), /Still unanswered: q2/);
+  });
+
+  it('should_refuse_the_same_question_answered_twice_in_one_call', () => {
+    const verdict = planAnswers(file(), [both[0], { id: 'q1', answer: 'No' }, both[1]]);
+
+    assert.match(reasonOf(verdict), /answered twice/);
+  });
+
+  it('should_refuse_an_empty_answer', () => {
+    const verdict = planAnswers(file(), [{ id: 'q1', answer: '   ' }, both[1]]);
+
+    assert.match(reasonOf(verdict), /q1 needs an answer/);
+  });
+
+  it('should_trim_an_answer', () => {
+    const answers = valueOf(planAnswers(file(), [{ id: 'q1', answer: '  Yes  ' }, both[1]]));
+
+    assert.equal(answers[0].answer, 'Yes');
+  });
+
+  it('should_refuse_an_over_long_answer', () => {
+    const verdict = planAnswers(file(), [{ id: 'q1', answer: 'x'.repeat(4001) }, both[1]]);
+
+    assert.match(reasonOf(verdict), /4000 characters/);
+  });
+
+  it('should_refuse_an_empty_or_malformed_answer_list', () => {
+    for (const raw of [[], undefined, 'yes', {}]) {
+      assert.ok(!planAnswers(file(), raw).ok, JSON.stringify(raw));
+    }
   });
 });
 

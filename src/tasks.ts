@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { jobState } from './history';
-import { enabledPlanSteps, generateCommand, shellKind } from './launch';
+import { ASK_SERVER, enabledPlanSteps, generateCommand, shellKind } from './launch';
 import * as library from './library';
 import { log } from './log';
 import { createNonce, Manager } from './manager';
@@ -338,10 +338,18 @@ export class TaskView implements vscode.WebviewViewProvider, vscode.Disposable {
     const sessionDir = path.join(paths.pending, sessionId);
     fs.mkdirSync(sessionDir, { recursive: true });
 
+    // Written before the terminal exists, because the CLI reads it at startup.
+    const askConfigPath = config.get<boolean>('remoteQuestions', true)
+      ? this.writeAskConfig(sessionDir, paths.folder, firstLine(task.label).slice(0, 80))
+      : undefined;
+
     const command = generateCommand({
       exe: config.get<string>('claudePath', 'claude'),
       sourcePath: task.filePath,
       destDir: sessionDir,
+      // Set means the session asks through Chronos rather than through this
+      // terminal, and delivers its plan the same way.
+      askConfigPath,
       // One grant covers task, staging folder and library, since all three are
       // inside the folder's `.chronos` root.
       allowDir: paths.root,
@@ -379,6 +387,61 @@ export class TaskView implements vscode.WebviewViewProvider, vscode.Disposable {
     terminal.show();
     terminal.sendText(command);
     log.info(`opened a planning session for task ${task.name} in ${cwd}`);
+  }
+
+  /**
+   * Registers this session's own back-channel, and returns the config path to
+   * hand the CLI. Returns undefined if it could not be written, which simply
+   * leaves the session asking in the terminal as it did before.
+   *
+   * The server path is taken from `extensionUri` — the install that is actually
+   * running — so it re-points itself on every extension update. A client entry
+   * registered by hand does not, which is the one thing that reliably breaks a
+   * Chronos MCP setup.
+   *
+   * Nothing else about the session changes: the watcher pattern is `*.md`, so
+   * `mcp.json` cannot be mistaken for a landed plan, and `discard()` already
+   * deletes the folder and everything in it.
+   */
+  private writeAskConfig(sessionDir: string, folder: string, source: string): string | undefined {
+    const serverPath = vscode.Uri.joinPath(this.extensionUri, 'dist', 'mcp-server.js').fsPath;
+    const configPath = path.join(sessionDir, 'mcp.json');
+
+    try {
+      fs.writeFileSync(
+        configPath,
+        JSON.stringify(
+          {
+            mcpServers: {
+              [ASK_SERVER]: {
+                // `node` rather than the bundled runtime, matching what
+                // `copyMcpConfig` already tells people to use.
+                command: 'node',
+                args: [
+                  serverPath,
+                  '--folder',
+                  folder,
+                  // Ask and submit only. A session running unattended has no
+                  // way to put anything on the schedule.
+                  '--ask-only',
+                  '--pending',
+                  sessionDir,
+                  '--source',
+                  source
+                ]
+              }
+            }
+          },
+          null,
+          2
+        ),
+        'utf8'
+      );
+      return configPath;
+    } catch (err) {
+      log.warn(`could not route this planning session's questions through Chronos: ${String(err)}`);
+      return undefined;
+    }
   }
 
   /**

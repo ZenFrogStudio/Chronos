@@ -22,6 +22,50 @@ logic out; one of the moves also narrowed a guard.
 
 ### Added
 
+- **Answer a planning session's questions from your phone.** Pressing **Generate
+  plan** opens an interactive Claude session in a terminal, and every question it
+  asks needs somebody sitting at that terminal to answer. That is fine at the
+  desk and useless anywhere else: capture a task on the way out and the plan does
+  not get written until you are back.
+
+  The questions now come out through the Chronos MCP server instead. The session
+  calls `ask_user`, which writes the question into `.chronos/questions` and then
+  blocks, polling once a second until an answer lands. Anything with access to
+  the same folder can answer it — in practice Claude Desktop, driven from a phone
+  by the Dispatch app, on this same machine. Same filesystem, so a question and
+  its answer are just files: no port, no token, nothing leaving the machine.
+
+  Both prompts travel that way, not just the first. Routing only the questions
+  would still leave the session parked at *shall I go ahead?* until you were back
+  at the keyboard, so the finished plan is sent as a question too, and on
+  approval the session calls `submit_plan` rather than writing a file itself. The
+  plan lands in the staging folder the existing watcher already watches, so it is
+  adopted into the library and clears its task exactly as before. Capture a task
+  on the phone, press Generate on the way out, answer from the bus, and come back
+  to a plan sitting in the library.
+
+  Four new tools, taking the surface from eleven to fifteen. `ask_user` and
+  `submit_plan` are what a planning session calls; `list_questions` and
+  `answer_question` are what you answer it with. A session is spawned with
+  `--ask-only`, which withholds every other tool from it — it can ask, and it can
+  deliver a plan, and it cannot put anything on the schedule. Nobody is watching
+  it, so that is the only surface it should have.
+
+  A routed session runs in `--permission-mode default` rather than
+  `--permission-mode plan`. This was measured before anything was built, and it
+  is the one thing the design turned on: plan mode refuses an MCP tool call
+  outright even when it is allowlisted — `Cannot call mcp__chronos-ask__ask_user
+  while in plan mode` — which would leave the session unable to ask its question
+  or deliver its plan. In `default` the two allowlisted tools go through without
+  a prompt and everything else still stops and asks; nobody is there to approve
+  those, so an unattended session still cannot make an edit. The mode changes
+  what it may *call*, not what it may *change*.
+
+  New setting `chronos.remoteQuestions`, on by default. Turn it off and
+  **Generate plan** behaves exactly as it did, asking in the terminal and nowhere
+  else. Unanswered questions are swept after a week, alongside the existing
+  `.pending` sweep.
+
 - **Chronos as an MCP server, so a coding agent can drive it.** Until now the
   only way to get work into Chronos was to sit in VS Code and do it by hand:
   plans written in the manager, tasks typed into the sidebar, schedules set by
@@ -228,6 +272,23 @@ logic out; one of the moves also narrowed a guard.
   `install` because npm runs a script by the latter name itself during
   `npm install`; source guards now hold that name, the editor it targets, the
   script's existence and its version lookup.
+
+### Fixed
+
+- **Generate plan lost its instruction entirely whenever no model was pinned.**
+  The command ended `--add-dir <library> <instruction>`, and the CLI declares
+  `--add-dir` variadic (`<directories...>`), so it went on swallowing arguments
+  until it met another flag — taking the instruction with it as one more
+  directory. The session then opened with no prompt at all: a terminal sitting at
+  an empty Claude prompt, with nothing anywhere to say why. It only worked when
+  `chronos.planModel` was set, because `--model` then sat between the two and
+  stopped the swallowing.
+
+  The instruction now goes first, ahead of every flag, where nothing variadic can
+  reach it — and `--mcp-config` and `--allowedTools`, both also variadic, cannot
+  reintroduce the same bug. A `--` separator would have worked too, but not
+  portably: cmd only accepts it bare and PowerShell only passes it through
+  quoted, and moving one argument does the same job in all three shells.
 
 ### Changed
 

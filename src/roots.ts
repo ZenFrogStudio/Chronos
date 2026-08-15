@@ -29,6 +29,11 @@ export interface ChronosPaths {
   tasks: string;
   /** Staging for in-flight plan generation. Dot-prefixed so it is never listed. */
   pending: string;
+  /**
+   * Questions a planning session is waiting on an answer to. Not dot-prefixed,
+   * unlike `.pending`: these are worth finding by hand when a session goes wrong.
+   */
+  questions: string;
   results: string;
   logs: string;
   /** Plans and tasks removed from the library. Kept, never pruned. */
@@ -47,6 +52,7 @@ export function pathsFor(folder: string): ChronosPaths {
     plans: path.join(root, 'plans'),
     tasks: path.join(root, 'tasks'),
     pending: path.join(root, '.pending'),
+    questions: path.join(root, 'questions'),
     results: path.join(root, 'results'),
     logs: path.join(root, 'logs'),
     archive: path.join(root, 'archive'),
@@ -70,7 +76,7 @@ export function pathsFor(folder: string): ChronosPaths {
 export function ensureRoot(paths: ChronosPaths): boolean {
   const created = fs.mkdirSync(paths.root, { recursive: true }) !== undefined;
 
-  for (const dir of [paths.plans, paths.tasks, paths.results, paths.logs]) {
+  for (const dir of [paths.plans, paths.tasks, paths.questions, paths.results, paths.logs]) {
     fs.mkdirSync(dir, { recursive: true });
   }
 

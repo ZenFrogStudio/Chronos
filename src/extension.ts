@@ -8,6 +8,7 @@ import { seedLibrary } from './library';
 import { initLog, log, logConsolidation, logRetirement, pruneLogs } from './log';
 import { Manager } from './manager';
 import { migrate } from './migrate';
+import { sweepQuestions } from './questions';
 import { retireCompletedPlans } from './retire';
 import { ChronosPaths, ensureRoot, pathsFor, sweepPending } from './roots';
 import { probeAgent, Runner } from './runner';
@@ -70,6 +71,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }
     for (const dir of report.kept) {
       log.warn(`kept ${dir} — it still holds a generated plan that never reached the library`);
+    }
+
+    // Questions from sessions that ended mid-conversation. Nothing will ever
+    // come back for these: the session that was waiting on the answer is gone.
+    const questions = sweepQuestions(paths().questions);
+    if (questions > 0) {
+      log.info(`removed ${questions} stale planning question(s)`);
     }
   };
 

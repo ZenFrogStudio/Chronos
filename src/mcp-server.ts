@@ -4,7 +4,22 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { z } from 'zod';
 import * as library from './library';
-import { planSeriesOverrides, planSeriesUpdate, planTiming, ScheduleWhen } from './mcp-tools';
+import {
+  planAnswers,
+  planQuestion,
+  planSeriesOverrides,
+  planSeriesUpdate,
+  planTiming,
+  ScheduleWhen
+} from './mcp-tools';
+import {
+  listQuestions,
+  newQuestionId,
+  QuestionFile,
+  readQuestion,
+  recordAnswers,
+  writeQuestion
+} from './questions';
 import { pathsFor, ensureRoot, ChronosPaths } from './roots';
 import { createSeries } from './series';
 import { readState, updateState } from './state-file';
@@ -27,7 +42,14 @@ import { ChronosState, TaskRun, TaskSeries } from './types';
  *   //Resolve the project folder from --folder, defaulting to cwd;
  *   //Register the read tools, which never create anything on disk;
  *   //Register the write tools, each one going through mcp-tools.ts first;
+ *   //Register the ask tools, which carry a question to a user who is elsewhere;
  *   //Serve over stdio, logging to stderr only.
+ *
+ * It wears two hats, and `--ask-only` is which one. Without it this is the
+ * project's general-purpose server, the one a user registers in Claude Desktop
+ * or Claude Code. With it, it is the private back-channel of a single planning
+ * session: `ask_user` to reach a user who is not at the terminal, `submit_plan`
+ * to hand back the result, and nothing that can put anything on the schedule.
  *
  * Two containment rules live here, at the filesystem edge, and neither is in
  * `mcp-tools.ts` because both are about paths rather than about rules:
@@ -62,17 +84,45 @@ function note(text: string): void {
 }
 
 /**
+ * The value after `flag`, or undefined. A value that looks like another flag is
+ * treated as absent, so a missing argument cannot silently swallow the next one.
+ */
+function argValue(argv: readonly string[], flag: string): string | undefined {
+  const at = argv.indexOf(flag);
+  const value = at >= 0 ? argv[at + 1] : undefined;
+  return value && !value.startsWith('--') ? value : undefined;
+}
+
+const ARGV = process.argv.slice(2);
+
+/**
  * The project folder this server speaks for, fixed for the life of the process.
  * One folder per server, matching the extension: a schedule belongs to a
  * project, and an agent is already working in one.
  */
-function folderArg(argv: readonly string[]): string {
-  const flag = argv.indexOf('--folder');
-  const value = flag >= 0 ? argv[flag + 1] : undefined;
-  return path.resolve(value && !value.startsWith('--') ? value : process.cwd());
-}
+const FOLDER = path.resolve(argValue(ARGV, '--folder') ?? process.cwd());
 
-const FOLDER = folderArg(process.argv.slice(2));
+/**
+ * Narrows the surface to what a planning session needs: `ask_user` to reach the
+ * user, and `submit_plan` to deliver the result. Nothing that can schedule.
+ *
+ * Two things fall out of that. An unattended session cannot put anything on the
+ * schedule even if it decides to, and — since the user's own agent config
+ * usually already registers a full `chronos` server — the session is not handed
+ * two overlapping tool lists to choose between.
+ */
+const ASK_ONLY = ARGV.includes('--ask-only');
+
+/**
+ * Where `submit_plan` writes: the staging folder of the session that spawned
+ * this server. Given once, at spawn — no path ever comes off the wire. Absent
+ * means the tool is not registered at all.
+ */
+const PENDING = argValue(ARGV, '--pending');
+
+/** What this session is working on, stamped onto every question it asks. */
+const SOURCE = argValue(ARGV, '--source');
+
 const paths = (): ChronosPaths => pathsFor(FOLDER);
 
 /** Called before every write, never before a read. See the header. */
@@ -176,9 +226,20 @@ const server = new McpServer(
   { capabilities: { tools: {} } }
 );
 
+/**
+ * Everything except `ask_user` and `submit_plan`, registered through here so
+ * `--ask-only` can withhold the lot with one binding rather than an `if` wrapped
+ * around three hundred lines.
+ *
+ * Withheld rather than refused at call time: a tool that is never declared does
+ * not appear in the session's tool list at all, so there is nothing for it to
+ * try, and nothing for a model to talk itself into.
+ */
+const fullSurface = ASK_ONLY ? undefined : server;
+
 // ---------- read ----------
 
-server.registerTool(
+fullSurface?.registerTool(
   'list_plans',
   {
     title: 'List plans',
@@ -198,7 +259,7 @@ server.registerTool(
     )
 );
 
-server.registerTool(
+fullSurface?.registerTool(
   'read_plan',
   {
     title: 'Read a plan',
@@ -215,7 +276,7 @@ server.registerTool(
   }
 );
 
-server.registerTool(
+fullSurface?.registerTool(
   'list_tasks',
   {
     title: 'List captured tasks',
@@ -236,7 +297,7 @@ server.registerTool(
   }
 );
 
-server.registerTool(
+fullSurface?.registerTool(
   'list_schedule',
   {
     title: 'List the schedule',
@@ -248,7 +309,7 @@ server.registerTool(
   async () => replyJson(state().series.map(describeSeries))
 );
 
-server.registerTool(
+fullSurface?.registerTool(
   'list_runs',
   {
     title: 'List runs',
@@ -269,7 +330,7 @@ server.registerTool(
   }
 );
 
-server.registerTool(
+fullSurface?.registerTool(
   'read_transcript',
   {
     title: 'Read a run transcript',
@@ -296,7 +357,7 @@ server.registerTool(
 
 // ---------- write ----------
 
-server.registerTool(
+fullSurface?.registerTool(
   'add_task',
   {
     title: 'Capture a task',
@@ -316,7 +377,7 @@ server.registerTool(
   }
 );
 
-server.registerTool(
+fullSurface?.registerTool(
   'add_plan',
   {
     title: 'Write a plan',
@@ -336,7 +397,7 @@ server.registerTool(
   }
 );
 
-server.registerTool(
+fullSurface?.registerTool(
   'schedule_plan',
   {
     title: 'Schedule a plan',
@@ -418,7 +479,7 @@ server.registerTool(
   }
 );
 
-server.registerTool(
+fullSurface?.registerTool(
   'update_schedule',
   {
     title: 'Change a schedule',
@@ -489,7 +550,7 @@ server.registerTool(
   }
 );
 
-server.registerTool(
+fullSurface?.registerTool(
   'unschedule',
   {
     title: 'Unschedule a task',
@@ -514,6 +575,248 @@ server.registerTool(
     return reply(`Unscheduled ${series.fileName}. Its plan is still in the library.`);
   }
 );
+
+// ---------- asking the user ----------
+
+/**
+ * How often the waiting session looks for an answer. A second is imperceptible
+ * to somebody typing on a phone and costs one small read of one small file.
+ */
+const POLL_MS = 1000;
+
+/** Long enough to be worth waiting through; short enough to fit inside a
+ *  client's own tool timeout, which is what the resume path is for. */
+const DEFAULT_WAIT_SECONDS = 240;
+const MIN_WAIT_SECONDS = 5;
+const MAX_WAIT_SECONDS = 600;
+
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Polls until the question is answered or the wait lapses.
+ *
+ * Returns the answered file, or undefined for both "not yet" and "no longer
+ * there" — the caller says the same thing to either, because the recovery is
+ * the same: call again with the id, and be told plainly if it has gone.
+ */
+async function waitForAnswers(
+  dir: string,
+  id: string,
+  waitSeconds: number
+): Promise<QuestionFile | undefined> {
+  const deadline = Date.now() + waitSeconds * 1000;
+
+  for (;;) {
+    const file = readQuestion(dir, id);
+    if (!file) {
+      return undefined; // Swept, or deleted by hand. Nothing will answer it now.
+    }
+    if (file.answeredAt) {
+      return file;
+    }
+    if (Date.now() >= deadline) {
+      return undefined;
+    }
+    await sleep(POLL_MS);
+  }
+}
+
+server.registerTool(
+  'ask_user',
+  {
+    title: 'Ask the user a question',
+    description:
+      'Puts a question to the user and waits for the answer. Use this when nobody is at the ' +
+      'terminal you are running in — the question is written into this project so it can be ' +
+      'answered from another device. Blocks until it is answered or the wait runs out; if it ' +
+      'runs out, call again with the `id` you get back to keep waiting.',
+    inputSchema: z.object({
+      summary: z
+        .string()
+        .optional()
+        .describe('One or two sentences on what this is about. Required unless resuming an `id`.'),
+      questions: z
+        .array(
+          z.object({
+            question: z.string().describe('The question, in plain language'),
+            options: z.array(z.string()).optional().describe('Suggested replies, if you have a shortlist')
+          })
+        )
+        .optional()
+        .describe('One to ten questions. Required unless resuming an `id`.'),
+      waitSeconds: z
+        .number()
+        .optional()
+        .describe(`How long to wait. Default ${DEFAULT_WAIT_SECONDS}, allowed 5 to 600.`),
+      id: z
+        .string()
+        .optional()
+        .describe('Resume waiting on a question already asked. Omit to ask a new one.')
+    })
+  },
+  async ({ summary, questions, waitSeconds, id }) => {
+    const dir = ensureWritable().questions;
+
+    const wait = Math.min(
+      MAX_WAIT_SECONDS,
+      Math.max(MIN_WAIT_SECONDS, Math.round(waitSeconds ?? DEFAULT_WAIT_SECONDS))
+    );
+
+    let questionId: string;
+    if (id) {
+      const existing = readQuestion(dir, id);
+      if (!existing) {
+        return refuse(
+          `There is no open question with the id ${id}. Ask a new one, or ask in the terminal.`
+        );
+      }
+      if (existing.answeredAt) {
+        return replyJson({ id, answers: existing.answers ?? [] });
+      }
+      questionId = id;
+    } else {
+      const planned = planQuestion({ summary, questions });
+      if (!planned.ok) {
+        return refuse(planned.reason);
+      }
+      questionId = newQuestionId();
+      writeQuestion(dir, {
+        id: questionId,
+        askedAt: new Date().toISOString(),
+        // From the spawn arguments, never from the caller: the label on a
+        // question has to be the task it really came from.
+        ...(SOURCE ? { source: SOURCE } : {}),
+        summary: planned.value.summary,
+        questions: planned.value.questions
+      });
+      note(`asked question ${questionId}`);
+    }
+
+    const answered = await waitForAnswers(dir, questionId, wait);
+    if (answered) {
+      note(`question ${questionId} was answered`);
+      return replyJson({ id: questionId, answers: answered.answers ?? [] });
+    }
+
+    return reply(
+      `No answer yet after ${wait} seconds. The question id is ${questionId}. Call ask_user ` +
+        `again with id: "${questionId}" to keep waiting. If that keeps happening, ask in the ` +
+        'terminal instead.'
+    );
+  }
+);
+
+fullSurface?.registerTool(
+  'list_questions',
+  {
+    title: 'List questions waiting for an answer',
+    description:
+      'Questions a Chronos planning session has asked and is still waiting on, newest first. ' +
+      'Answer one with answer_question.',
+    inputSchema: z.object({
+      includeAnswered: z
+        .boolean()
+        .optional()
+        .describe('Include questions already answered. Default false.')
+    })
+  },
+  async ({ includeAnswered }) =>
+    replyJson(
+      listQuestions(paths().questions)
+        .filter((file) => includeAnswered || !file.answeredAt)
+        .map((file) => ({
+          id: file.id,
+          askedAt: file.askedAt,
+          source: file.source,
+          summary: file.summary,
+          questions: file.questions,
+          answeredAt: file.answeredAt,
+          answers: file.answers
+        }))
+    )
+);
+
+fullSurface?.registerTool(
+  'answer_question',
+  {
+    title: 'Answer a question',
+    description:
+      'Records the answers to a question from list_questions, which is what unblocks the ' +
+      'planning session waiting on it. Every question in the set must be answered in one ' +
+      'call, and a question can only be answered once.',
+    inputSchema: z.object({
+      id: z.string().describe('Question id, from list_questions'),
+      answers: z
+        .array(
+          z.object({
+            id: z.string().describe('Which question this answers, e.g. "q1"'),
+            answer: z.string().describe('The answer, in plain language')
+          })
+        )
+        .describe('One answer for each question that was asked')
+    })
+  },
+  async ({ id, answers }) => {
+    const dir = paths().questions;
+
+    const file = readQuestion(dir, id);
+    if (!file) {
+      return refuse(`There is no question with the id ${id}. Call list_questions for the open ones.`);
+    }
+    if (file.answeredAt) {
+      return refuse(`That question was already answered at ${file.answeredAt}.`);
+    }
+
+    const checked = planAnswers(file, answers);
+    if (!checked.ok) {
+      return refuse(checked.reason);
+    }
+
+    // Re-read inside `recordAnswers`, so a question answered between the check
+    // above and here is refused rather than quietly overwritten.
+    const recorded = recordAnswers(ensureWritable().questions, id, checked.value);
+    if (!recorded.ok) {
+      return refuse(recorded.reason);
+    }
+
+    note(`answered question ${id}`);
+    return reply(`Answered. The session waiting on ${id} will pick this up within a second or two.`);
+  }
+);
+
+if (PENDING) {
+  const destination = PENDING;
+
+  server.registerTool(
+    'submit_plan',
+    {
+      title: 'Submit the finished plan',
+      description:
+        'Delivers the approved plan to Chronos, which files it in this project’s plan library ' +
+        'and clears the task it came from. Call this instead of writing the plan to a file ' +
+        'yourself. Does not schedule it — a person does that.',
+      inputSchema: z.object({
+        title: z
+          .string()
+          .min(1)
+          .max(200)
+          .describe('Short summary of the change the plan makes; the file name comes from it'),
+        body: z.string().min(1).max(500_000).describe('The plan itself, as Markdown')
+      })
+    },
+    async ({ title, body }) => {
+      // Into the folder given at spawn, never a path off the wire, and through
+      // the same `createPlan` the library uses — so the slug, the collision
+      // suffix and the extension are the ones the watcher is already expecting.
+      const plan = library.createPlan(destination, title, body);
+      note(`submitted plan ${plan.name}`);
+      return reply(
+        `Delivered ${plan.name}. Chronos is filing it in the plan library now, and the task ` +
+          'it came from is done. Nothing else is needed.'
+      );
+    }
+  );
+}
 
 ///////////////////////////*Helpers*////////////////////////////
 

@@ -41,6 +41,7 @@ const GROUPS: { title: string; keys: string[] }[] = [
     title: 'Planning',
     keys: [
       'planModel',
+      'remoteQuestions',
       'planStep.tests',
       'planStep.version',
       'planStep.changelog',

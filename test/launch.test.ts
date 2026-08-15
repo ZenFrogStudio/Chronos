@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
+  ASK_SERVER,
+  ASK_TOOLS,
   buildArgs,
   enabledPlanSteps,
   generateCommand,
@@ -260,6 +262,24 @@ describe('generateCommand', () => {
     assert.ok(!/[^\x20-\x7e]/.test(command), 'the command must be plain ASCII');
   });
 
+  it('should_put_the_instruction_where_no_variadic_flag_can_eat_it', () => {
+    // `--add-dir`, `--mcp-config` and `--allowedTools` are all variadic in the
+    // CLI, so each consumes arguments until it meets another flag. An
+    // instruction trailing after one is read as one more directory and the
+    // session opens with no prompt at all — silently, with the terminal sitting
+    // there empty. That is how it shipped broken whenever no model was pinned,
+    // because `--add-dir` was then the last flag before the instruction.
+    for (const options of [{}, { model: 'opus' }, { askConfigPath: ASK_CONFIG }]) {
+      const command = generateCommand(generatable(options));
+      const label = JSON.stringify(options);
+
+      assert.ok(command.includes("'claude' 'Read the file at"), `${label}: instruction is not first`);
+      // Nothing variadic may precede it, which is the property that actually
+      // matters — the position is only how it is achieved.
+      assert.ok(command.indexOf("'Read the file at") < command.indexOf('--add-dir'), label);
+    }
+  });
+
   it('should_always_plan_regardless_of_any_other_permission_mode', () => {
     // The series may be set to bypassPermissions; this writes a plan, it does
     // not carry one out.
@@ -329,6 +349,158 @@ describe('generateCommand', () => {
     );
 
     assert.ok(command.includes(`--add-dir 'C:\\o''brien'`));
+  });
+});
+
+const ASK_CONFIG = 'D:\\plans\\.pending\\ab12cd\\mcp.json';
+
+const routed = (overrides: Partial<Parameters<typeof generateCommand>[0]> = {}) =>
+  generateCommand(
+    generatable({ sourcePath: TASK, destDir: STAGING, askConfigPath: ASK_CONFIG, ...overrides })
+  );
+
+describe('generateCommand — questions routed through Chronos', () => {
+  it('should_register_the_ask_server_with_the_cli', () => {
+    // Without this the session has no `chronos-ask` tools at all, and the
+    // instruction below names tools that do not exist.
+    assert.ok(routed().includes(`--mcp-config '${ASK_CONFIG}'`));
+  });
+
+  it('should_allowlist_exactly_the_tools_the_session_may_call', () => {
+    // Anything not on this list stops and asks, and nobody is there to answer.
+    const command = routed();
+
+    assert.ok(command.includes(`--allowedTools '${ASK_TOOLS.join(',')}'`));
+    for (const tool of ASK_TOOLS) {
+      assert.ok(command.includes(tool), `${tool} is not allowlisted`);
+    }
+  });
+
+  it('should_name_both_tools_in_the_instruction_as_well_as_the_allowlist', () => {
+    // The allowlist says what it *may* call; the instruction is what makes it
+    // actually call them rather than talking to the terminal.
+    const command = routed();
+
+    assert.ok(command.includes(`calling mcp__${ASK_SERVER}__ask_user`));
+    assert.ok(command.includes(`call mcp__${ASK_SERVER}__submit_plan`));
+  });
+
+  it('should_say_why_the_terminal_is_no_use', () => {
+    // A model that reads "ask me anything" with a terminal in front of it will
+    // use the terminal, and the question then waits for a keyboard nobody is
+    // sitting at.
+    assert.ok(routed().includes('I am not at this terminal'));
+  });
+
+  it('should_route_the_approval_step_too_rather_than_only_the_questions', () => {
+    // Otherwise the session finishes its plan and parks at "shall I go ahead?"
+    // until the user is back at the desk — the whole thing this avoids.
+    assert.ok(routed().includes('send me a summary of it the same way and wait for my answer'));
+  });
+
+  it('should_tell_the_session_how_to_carry_on_waiting', () => {
+    // Each ask_user call is short so it fits inside the client's own tool
+    // timeout; carrying on is the session calling again with the same id.
+    assert.ok(routed().includes('call it again with the same id'));
+  });
+
+  it('should_never_tell_a_routed_session_to_write_the_plan_to_a_file', () => {
+    // The plan arrives through submit_plan. Two ways to deliver it is one way
+    // for a session to deliver it twice, or to the wrong place.
+    const command = routed();
+
+    assert.ok(!command.includes('save the approved plan as a new .md file'));
+    assert.ok(!command.includes('overwrite that same file'));
+    assert.ok(!command.includes('ending in .md'));
+  });
+
+  it('should_still_ask_for_a_name_describing_the_change', () => {
+    // submit_plan takes a title rather than a file name, but the naming rule is
+    // the same one: do not just repeat the request back.
+    const command = routed();
+
+    assert.ok(command.includes('Title it with a short summary of the change the plan makes'));
+    assert.ok(command.includes('Do not just repeat the words of the request'));
+  });
+
+  it('should_run_in_default_mode_because_plan_mode_refuses_mcp_tools', () => {
+    // Measured, not assumed: in plan mode the CLI refuses an MCP tool call
+    // outright even when it is allowlisted, so a routed session could neither
+    // ask its question nor deliver its plan. `default` lets the two allowlisted
+    // tools through and still stops and asks for everything else.
+    const command = routed();
+
+    assert.ok(command.includes('--permission-mode default'));
+    assert.ok(!command.includes('--permission-mode plan'));
+    assert.ok(!command.includes('--allow-dangerously-skip-permissions'));
+  });
+
+  it('should_still_ask_for_the_closing_step', () => {
+    const command = routed({ steps: ['version', 'commit'] });
+
+    assert.ok(command.includes('bumps the project version'));
+    assert.ok(command.includes('belongs in the plan you write, not something you do now'));
+  });
+
+  it('should_keep_the_routed_instruction_free_of_shell_metacharacters', () => {
+    // Same rule as the instruction it replaces: one quoted argument typed into
+    // a live shell. Underscores are safe in all three shells; a backtick around
+    // a tool name would not be.
+    const command = routed({ steps: ['tests', 'version', 'changelog', 'rebuild', 'commit'] });
+
+    assert.ok(!command.includes('`'), 'a backtick would run a command');
+    assert.ok(!command.includes('$'), 'PowerShell would expand it');
+    assert.ok(!command.includes('!'), 'interactive bash would expand it');
+    assert.ok(!/[^\x20-\x7e]/.test(command), 'the command must be plain ASCII');
+  });
+
+  it('should_quote_the_config_path_for_each_shell', () => {
+    const spaced = 'C:\\My Plans\\.pending\\ab12cd\\mcp.json';
+    const quoted: Record<Shell, string> = {
+      powershell: `--mcp-config '${spaced}'`,
+      cmd: `--mcp-config "${spaced}"`,
+      posix: `--mcp-config '${spaced}'`
+    };
+
+    for (const shell of ['powershell', 'cmd', 'posix'] as Shell[]) {
+      assert.ok(routed({ askConfigPath: spaced, shell }).includes(quoted[shell]), shell);
+    }
+  });
+
+  it('should_still_grant_access_to_the_library', () => {
+    assert.ok(routed().includes(`--add-dir '${LIBRARY}'`));
+  });
+
+  it('should_still_pin_the_model_when_one_is_chosen', () => {
+    assert.ok(routed({ model: 'opus' }).includes('--model opus'));
+  });
+
+  it('should_leave_the_unrouted_command_exactly_as_it_was', () => {
+    // The setting is off, or the config could not be written. This is the path
+    // every existing user is on, and it must not shift by a byte.
+    const command = generateCommand(generatable({ sourcePath: TASK, destDir: STAGING }));
+
+    assert.equal(
+      command,
+      "'claude' " +
+        "'Read the file at D:\\plans\\tasks\\refactor-the-auth-module.md. Treat what it says " +
+        'as the request, work out how to carry it out, and write an implementation plan for ' +
+        'it. Ask me anything you need to first. When I approve the plan, save the approved ' +
+        'plan as a new .md file in D:\\plans\\.pending\\ab12cd, written as instructions for an ' +
+        'agent that will carry it out later with nobody watching, and change nothing else. ' +
+        'Name that file with a short summary of the change the plan makes, in lower case with ' +
+        'hyphens instead of spaces, ending in .md, for example add-monthly-repeat-option.md. ' +
+        "Do not just repeat the words of the request.' " +
+        "--permission-mode plan --add-dir 'D:\\plans'"
+    );
+  });
+
+  it('should_mention_neither_mcp_flag_when_the_session_is_not_routed', () => {
+    const command = generateCommand(generatable({ sourcePath: TASK, destDir: STAGING }));
+
+    assert.ok(!command.includes('--mcp-config'));
+    assert.ok(!command.includes('--allowedTools'));
+    assert.ok(!command.includes('mcp__'));
   });
 });
 

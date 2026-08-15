@@ -138,6 +138,20 @@ export function enabledPlanSteps(
   );
 }
 
+/**
+ * The MCP server name a routed planning session talks to Chronos through, and
+ * the tools it is allowed to call.
+ *
+ * Exported and derived rather than written out, because these names appear in
+ * three places that must agree: the `--allowedTools` allowlist, the instruction
+ * that tells the session what to call, and the registrations in
+ * `mcp-server.ts`. Let those drift and the session sits on a permission prompt
+ * nobody is there to answer, with nothing in any log to say why —
+ * `source-guards.test.ts` checks the third one against these.
+ */
+export const ASK_SERVER = 'chronos-ask';
+export const ASK_TOOLS = ['ask_user', 'submit_plan'].map((tool) => `mcp__${ASK_SERVER}__${tool}`);
+
 export interface GenerateOptions {
   exe: string;
   /** The file Claude reads the request from — a library plan, or a sidebar task. */
@@ -160,6 +174,13 @@ export interface GenerateOptions {
    * sentence at all, which is what every toggle being off means.
    */
   steps?: PlanStepId[];
+  /**
+   * An `mcp.json` registering the `chronos-ask` server. Present means route the
+   * session's questions through it, so they can be answered from somewhere other
+   * than this terminal; absent means the session asks in the terminal as it
+   * always has, and every argument below is exactly what it was.
+   */
+  askConfigPath?: string;
 }
 
 /**
@@ -189,22 +210,16 @@ function closingSentence(steps: PlanStepId[]): string {
 }
 
 /**
- * The command line that opens an interactive planning session on a file.
+ * The instruction for a session that asks in the terminal, as it always has.
  *
- * The source text is deliberately absent: it is named, not pasted. A plan body is
- * multi-line and can be tens of kilobytes, cmd.exe caps a command line at 8191
- * characters, and newlines cannot survive a shell prompt at all. A path is one
- * line and quotes cleanly, and Claude reads the file itself.
- *
- * Always `--permission-mode plan`, whatever the series is set to run as — this
- * writes a plan, it does not carry one out.
+ * No `!`, `$`, backtick or quote of its own: interactive bash expands `!` and
+ * PowerShell expands `$`, so the only thing `quote` has to survive is a path.
  */
-export function generateCommand(options: GenerateOptions): string {
-  const { exe, sourcePath, destDir, allowDir, model, shell, steps = [] } = options;
-  const q = (value: string) => quote(shell, value);
-
-  // No `!`, `$`, backtick or quote of its own: interactive bash expands `!` and
-  // PowerShell expands `$`, so the only thing `quote` has to survive is a path.
+function terminalInstruction(
+  sourcePath: string,
+  destDir: string | undefined,
+  steps: PlanStepId[]
+): string {
   const destination = destDir
     ? `save the approved plan as a new .md file in ${destDir}`
     : 'overwrite that same file with the approved plan';
@@ -214,24 +229,107 @@ export function generateCommand(options: GenerateOptions): string {
     'lower case with hyphens instead of spaces, ending in .md, for example ' +
     'add-monthly-repeat-option.md. Do not just repeat the words of the request.';
 
-  const instruction =
+  return (
     `Read the file at ${sourcePath}. Treat what it says as the request, ` +
     'work out how to carry it out, and write an implementation plan for it. ' +
     `Ask me anything you need to first. When I approve the plan, ${destination}, ` +
     'written as instructions for an agent that will carry it out later with ' +
     'nobody watching, and change nothing else.' +
     (destDir ? naming : '') +
-    closingSentence(steps);
+    closingSentence(steps)
+  );
+}
+
+/**
+ * The instruction for a session whose user is somewhere else.
+ *
+ * Both ends of the conversation move: the questions go out through `ask_user`,
+ * and the finished plan comes back through `submit_plan` rather than through a
+ * file the session writes itself. Naming the tools and saying *why* is
+ * load-bearing — a model that reads "ask me anything" with a terminal in front
+ * of it will use the terminal, and the question then waits for a keyboard
+ * nobody is sitting at.
+ *
+ * The approval step travels the same way for the same reason. Routing only the
+ * questions would leave the session parked at "shall I go ahead?" until the user
+ * was back at the desk, which is the whole thing this is meant to avoid.
+ *
+ * Same ASCII rule as above: this is one argument typed into a live shell.
+ */
+function routedInstruction(sourcePath: string, steps: PlanStepId[]): string {
+  const [ask, submit] = ASK_TOOLS;
+
+  return (
+    `Read the file at ${sourcePath}. Treat what it says as the request, ` +
+    'work out how to carry it out, and write an implementation plan for it. ' +
+    `Ask me anything you need to first, and ask it only by calling ${ask} - ` +
+    'I am not at this terminal and a question asked any other way will not ' +
+    'reach me. When the plan is ready, send me a summary of it the same way and ' +
+    `wait for my answer. When I approve it, call ${submit} with the plan ` +
+    'written as instructions for an agent that will carry it out later with ' +
+    'nobody watching, and change nothing else. Title it with a short summary of ' +
+    'the change the plan makes, in lower case with hyphens instead of spaces. ' +
+    'Do not just repeat the words of the request. If ask_user comes back ' +
+    'unanswered, call it again with the same id; only if that keeps happening ' +
+    'should you ask me here in the terminal instead.' +
+    closingSentence(steps)
+  );
+}
+
+/**
+ * The command line that opens an interactive planning session on a file.
+ *
+ * The source text is deliberately absent: it is named, not pasted. A plan body is
+ * multi-line and can be tens of kilobytes, cmd.exe caps a command line at 8191
+ * characters, and newlines cannot survive a shell prompt at all. A path is one
+ * line and quotes cleanly, and Claude reads the file itself.
+ *
+ * `--permission-mode plan` for a session you are sitting at: it writes a plan,
+ * it does not carry one out, whatever the series is set to run as.
+ *
+ * A routed session cannot use plan mode, and this is measured rather than
+ * assumed — plan mode refuses an MCP tool call outright, allowlisted or not
+ * (`Cannot call mcp__chronos-ask__ask_user while in plan mode`), which would
+ * leave the session unable to ask its question or deliver its plan. It runs in
+ * `default` instead, where the two allowlisted tools go through without a
+ * prompt and everything else still stops and asks. Nobody is there to approve
+ * those, so an unattended session cannot make an edit either way — the mode
+ * changes what it may call, not what it may change.
+ */
+export function generateCommand(options: GenerateOptions): string {
+  const { exe, sourcePath, destDir, allowDir, model, shell, steps = [], askConfigPath } = options;
+  const q = (value: string) => quote(shell, value);
+
+  const instruction = askConfigPath
+    ? routedInstruction(sourcePath, steps)
+    : terminalInstruction(sourcePath, destDir, steps);
 
   // PowerShell reads a quoted string at the start of a line as a value, not a
   // command; & is what makes it run.
   const command = shell === 'powershell' ? `& ${q(exe)}` : q(exe);
 
-  const args = ['--permission-mode', 'plan', '--add-dir', q(allowDir)];
+  // The instruction goes *first*, ahead of every flag, and that position is
+  // load-bearing rather than stylistic. `--add-dir`, `--mcp-config` and
+  // `--allowedTools` are all declared variadic by the CLI
+  // (`--add-dir <directories...>`), so each one goes on consuming arguments
+  // until it meets another flag: an instruction trailing after one is read as
+  // one more directory, and the session opens with no prompt at all. That is
+  // how it fails today whenever no model is pinned, silently, with the terminal
+  // sitting at an empty prompt.
+  //
+  // Leading, it cannot be swallowed by anything, in any of the three shells. A
+  // `--` separator would also work, but not portably — cmd needs it bare and
+  // PowerShell only passes it through quoted, and a rule that subtle is worth
+  // avoiding when moving the argument does the same job.
+  const args = [q(instruction), '--permission-mode', askConfigPath ? 'default' : 'plan'];
+
+  args.push('--add-dir', q(allowDir));
+  if (askConfigPath) {
+    args.push('--mcp-config', q(askConfigPath), '--allowedTools', q(ASK_TOOLS.join(',')));
+  }
   if (model) {
     args.push('--model', model);
   }
-  args.push(q(instruction));
 
   return `${command} ${args.join(' ')}`;
 }
