@@ -22,6 +22,20 @@ logic out; one of the moves also narrowed a guard.
 
 ### Added
 
+- **A separate Reinstall closing step, alongside Rebuild.** A generated plan
+  could already be asked to end by rebuilding the project, which for anything
+  that ships as an installed artefact — an extension, a CLI, a packaged app —
+  stops one step short. The build lands on disk and the thing you are actually
+  running carries on being the old one, with nothing anywhere saying the two have
+  diverged. That is not hypothetical; it is why `reinstall.js` exists in this
+  repo.
+
+  New setting `chronos.planStep.reinstall`, off by default like Rebuild, because
+  most projects have nothing to install. It is a step of its own rather than a
+  wider Rebuild: a library rebuilds and never installs, so switching one on must
+  not drag the other along. Only useful with Rebuild switched on, though —
+  reinstalling without rebuilding just reinstalls the old build.
+
 - **Answer a planning session's questions from your phone.** Pressing **Generate
   plan** opens an interactive Claude session in a terminal, and every question it
   asks needs somebody sitting at that terminal to answer. That is fine at the
@@ -275,8 +289,20 @@ logic out; one of the moves also narrowed a guard.
 
 ### Fixed
 
-- **A plan switched off a repeat rule vanished from the library before it ever
-  ran as a one-shot.** Recurring plans were already held in the library — the
+- **A generated plan could land in the library without ever appearing in it.**
+  The end of a planning session hands over to the manager: the plan file is
+  copied into the library, the task is cleared, and the manager is opened with
+  the new plan selected. But opening a tab that was *already* open only brought
+  it forward — it never re-read the folder. The panel went on showing the list
+  it was last sent, and the "select this plan" message that followed named a row
+  it did not have, so nothing was selected either.
+
+  Keeping that list current was left entirely to the folder watcher, and a
+  watcher is not a guarantee: `fs.watch` drops events on Windows, and it is not
+  running at all when the library folder could not be watched. When it missed,
+  the plan was on disk, the task was gone from the inbox, and the manager showed
+  no sign of either — the work looked lost. Reopening the manager now re-reads
+  the library folder, which is one directory listing on a tab you just asked for. Recurring plans were already held in the library — the
   archive sweep refuses any series with a repeat rule — but the moment you
   changed **Repeat** from Weekly to Once, that protection was gone and the pile
   of completed runs the plan had made *while* it was repeating was suddenly a
@@ -327,6 +353,29 @@ logic out; one of the moves also narrowed a guard.
   quoted, and moving one argument does the same job in all three shells.
 
 ### Changed
+
+- **New extension icon** (`media/icon.png`, 128×128) — the teal-and-orange
+  ouroboros dragon, replacing the faceted sculpted head. It is the marketplace
+  icon and the manager panel's tab icon. Source art is kept at
+  `src/img/chronos-logo-v1.png`; `src/**` is in `.vscodeignore`, so the
+  half-megabyte original does not ship in the `.vsix`.
+
+- **The activity-bar icon is the dragon too** (`media/chronos.svg`), replacing
+  the clock-and-arrows line mark, so nothing anywhere still shows the old head.
+  Earlier releases left this one alone on the grounds that a dragon cannot
+  survive the constraints, and half of that was right: VS Code masks the icon to
+  a single theme colour and draws it at 16px, so the teal-and-sodium split, the
+  scales and the eye are all unusable.
+
+  What does survive is silhouette. The mark is redrawn as three flat shapes — a
+  heavy ring, a wedge head sized to take the downscale, and one horn — with the
+  tail ending in the jaws instead of curling into them. At 16px it reads as a
+  ring with a horned head rather than as the full ouroboros; at the 32px and
+  48px the icon is also served at, it reads properly. `currentColor` throughout,
+  so the activity bar still tints it to the theme foreground.
+
+  README now calls it the dragon icon rather than the clock icon, in both places
+  that told you what to click.
 
 - **The schedule is re-read when it changes on disk.** The store only re-read
   `state.json` on its own writes, which was enough while every writer was a VS

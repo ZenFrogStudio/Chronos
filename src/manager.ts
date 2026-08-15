@@ -121,6 +121,14 @@ export class Manager implements vscode.Disposable {
   open(preserveFocus = false): void {
     if (this.panel) {
       this.panel.reveal(this.panel.viewColumn ?? vscode.ViewColumn.Active, preserveFocus);
+      // Rebuilt from the folder here rather than left to the watcher. A plan
+      // adopted from a planning session lands while this tab is already open,
+      // and `fs.watch` is not a guarantee — it misses events on Windows, and it
+      // is not running at all if the library folder could not be watched. The
+      // plan file was then in the library with no row for it, and `reveal()`
+      // below selected a plan the panel had never heard of. One directory read
+      // on a tab the user just asked for is not worth being clever about.
+      this.post();
       return;
     }
 

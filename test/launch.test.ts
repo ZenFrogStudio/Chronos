@@ -251,7 +251,7 @@ describe('generateCommand', () => {
       generatable({
         sourcePath: TASK,
         destDir: STAGING,
-        steps: ['tests', 'version', 'changelog', 'rebuild', 'commit']
+        steps: ['tests', 'version', 'changelog', 'rebuild', 'reinstall', 'commit']
       })
     );
 
@@ -446,7 +446,9 @@ describe('generateCommand — questions routed through Chronos', () => {
     // Same rule as the instruction it replaces: one quoted argument typed into
     // a live shell. Underscores are safe in all three shells; a backtick around
     // a tool name would not be.
-    const command = routed({ steps: ['tests', 'version', 'changelog', 'rebuild', 'commit'] });
+    const command = routed({
+      steps: ['tests', 'version', 'changelog', 'rebuild', 'reinstall', 'commit']
+    });
 
     assert.ok(!command.includes('`'), 'a backtick would run a command');
     assert.ok(!command.includes('$'), 'PowerShell would expand it');
@@ -516,7 +518,7 @@ describe('enabledPlanSteps', () => {
   it('should_include_the_opt_in_steps_when_they_are_switched_on', () => {
     const steps = enabledPlanSteps(() => true);
 
-    assert.deepEqual(steps, ['tests', 'version', 'changelog', 'rebuild', 'commit']);
+    assert.deepEqual(steps, ['tests', 'version', 'changelog', 'rebuild', 'reinstall', 'commit']);
   });
 
   it('should_return_nothing_when_every_step_is_switched_off', () => {
@@ -538,8 +540,19 @@ describe('enabledPlanSteps', () => {
       'planStep.version',
       'planStep.changelog',
       'planStep.rebuild',
+      'planStep.reinstall',
       'planStep.commit'
     ]);
+  });
+
+  it('should_treat_rebuild_and_reinstall_as_two_independent_steps', () => {
+    // They are one habit but two decisions: a library rebuilds and never
+    // installs, and turning one on must not drag the other along.
+    const rebuildOnly = enabledPlanSteps((key) => key === 'planStep.rebuild');
+    const reinstallOnly = enabledPlanSteps((key) => key === 'planStep.reinstall');
+
+    assert.deepEqual(rebuildOnly, ['rebuild']);
+    assert.deepEqual(reinstallOnly, ['reinstall']);
   });
 });
 

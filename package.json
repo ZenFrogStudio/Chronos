@@ -2,7 +2,7 @@
   "name": "chronos",
   "displayName": "Chronos",
   "description": "Schedule Claude Code tasks from Markdown plan files.",
-  "version": "0.8.0-rc.50",
+  "version": "0.8.0-rc.52",
   "publisher": "Z3n",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -177,6 +177,11 @@
           "type": "boolean",
           "default": false,
           "markdownDescription": "Ask every generated plan to end by rebuilding the project. Off by default: a build is slow, and most changes are verified by the tests rather than by the artefact. Affects plans Chronos generates from now on; plans already in your library are untouched."
+        },
+        "chronos.planStep.reinstall": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Ask every generated plan to end by reinstalling the project, so the build it just made is the one actually running. Off by default: only projects that install an artefact — an extension, a CLI, a packaged app — have anything to reinstall. Separate from **Rebuild**, but only useful alongside it: reinstalling without rebuilding reinstalls the old build. Affects plans Chronos generates from now on; plans already in your library are untouched."
         },
         "chronos.planStep.commit": {
           "type": "boolean",

@@ -10,7 +10,7 @@ transcript of every run.
 
 Chronos is a single editor tab: your plan library on the left, detail on the
 right — schedule, working directory, permissions, the plan text itself, and run
-history. Clicking the clock icon in the activity bar opens it, alongside the
+history. Clicking the dragon icon in the activity bar opens it, alongside the
 Tasks view. You can also open it from the status bar item, the **Open Manager**
 button in the Tasks view, or `Chronos: Open Manager`.
 
@@ -33,7 +33,7 @@ though the plan file itself now lives in the library.
 
 ## Tasks — capturing work before it is a plan
 
-The clock icon in the activity bar opens **Tasks** — and the manager tab behind
+The dragon icon in the activity bar opens **Tasks** — and the manager tab behind
 it, without taking focus off the sidebar. Tasks is a one-line inbox for things
 you have not written a plan for yet. It exists because a plan is a considered
 document and a thought is not, and because the sidebar is always there — no tab

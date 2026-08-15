@@ -113,11 +113,11 @@ function quote(shell: Shell, value: string): string {
 }
 
 /** A step a generated plan is asked to end with, and whether it is on by default. */
-export type PlanStepId = 'tests' | 'version' | 'changelog' | 'rebuild' | 'commit';
+export type PlanStepId = 'tests' | 'version' | 'changelog' | 'rebuild' | 'reinstall' | 'commit';
 
 /**
  * Order matters and is fixed here rather than taken from the caller: verify,
- * then record, then build, then commit. Each phrase completes "a closing step
+ * then record, then build, then install, then commit. Each phrase completes "a closing step
  * that ...", and every one of them is ASCII with no shell metacharacter,
  * because the whole instruction is one argument typed into a live shell.
  */
@@ -126,6 +126,11 @@ export const PLAN_STEPS: readonly { id: PlanStepId; phrase: string; onByDefault:
   { id: 'version', phrase: 'bumps the project version', onByDefault: true },
   { id: 'changelog', phrase: 'adds a matching changelog entry', onByDefault: true },
   { id: 'rebuild', phrase: 'rebuilds the project', onByDefault: false },
+  {
+    id: 'reinstall',
+    phrase: 'reinstalls the project so the new build is the one running',
+    onByDefault: false
+  },
   { id: 'commit', phrase: 'commits the result to git', onByDefault: true }
 ];
 

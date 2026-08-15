@@ -46,6 +46,7 @@ const GROUPS: { title: string; keys: string[] }[] = [
       'planStep.version',
       'planStep.changelog',
       'planStep.rebuild',
+      'planStep.reinstall',
       'planStep.commit'
     ]
   },

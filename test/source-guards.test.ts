@@ -373,6 +373,28 @@ describe('source guards', () => {
     assert.ok(reload < sweep, 'store.reload() must come before retireCompletedPlans()');
   });
 
+  it('should_rebuild_the_plan_list_when_an_already_open_manager_is_reopened', () => {
+    // `open()` on a tab that already exists used to reveal it and return, which
+    // left the plan list as whatever was last posted. A plan adopted from a
+    // planning session lands exactly then — the task view calls `open()` and
+    // `reveal()` the moment the file reaches the library — so the new plan
+    // appeared only if `fs.watch` happened to catch it, and `reveal()` then
+    // selected a row the panel did not have. Nothing errors when it fails: the
+    // panel simply shows yesterday's library. `manager.ts` imports `vscode`, so
+    // reading the source is the only place this can be checked.
+    const manager = fs.readFileSync(path.join(SRC, 'manager.ts'), 'utf8');
+
+    const start = manager.indexOf('open(preserveFocus = false): void {');
+    assert.ok(start > 0, 'src/manager.ts no longer defines open()');
+    // The early-return branch only — the freshly created panel posts on `ready`.
+    const branch = manager.slice(start, manager.indexOf('return;', start));
+
+    assert.ok(
+      branch.includes('this.post()'),
+      'open() must re-post state when the manager tab is already open'
+    );
+  });
+
   it('should_ship_a_sash_element_for_every_sash_rule', () => {
     // The dividers are found by id, styled by class and never rendered by JS, so
     // a renamed id leaves the CSS styling nothing and the drag silently dead.
