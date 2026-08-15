@@ -21,7 +21,7 @@ import {
   writeQuestion
 } from './questions';
 import { pathsFor, ensureRoot, ChronosPaths } from './roots';
-import { createSeries } from './series';
+import { createSeries, stampRepeatEnd } from './series';
 import { readState, updateState } from './state-file';
 import { ChronosState, TaskRun, TaskSeries } from './types';
 
@@ -537,7 +537,10 @@ fullSurface?.registerTool(
     updateState(ensureWritable().state, (current) => {
       const target = current.series.find((s) => s.id === args.id);
       if (target) {
-        Object.assign(target, verdict.value);
+        // The same stamp the extension's store applies, for the same reason: a
+        // repeat rule dropped from here has to be dated too, or the window's
+        // next sweep archives the plan before its one-shot occurrence fires.
+        Object.assign(target, stampRepeatEnd(target, verdict.value));
         updated = target;
       }
     });

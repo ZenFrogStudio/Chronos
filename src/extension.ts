@@ -50,9 +50,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // server an agent spawned, or a second editor window on the same folder.
   const stateWatcher = new StateWatcher(paths, store);
 
-  /** A one-shot that has run has no future, so its file leaves the library. */
-  const retire = async (): Promise<void> =>
+  /** A one-shot that has run has no future, so its file leaves the library.
+   *  Re-read first: this moves files from what the schedule says, and a repeat
+   *  rule set in a second window on this folder has not reached this window's
+   *  copy — a file move is not covered by the read-modify-write that protects
+   *  every field write, so nothing would catch the mistake. */
+  const retire = async (): Promise<void> => {
+    store.reload();
     logRetirement(await retireCompletedPlans(store, paths().plans, paths().archivedPlans));
+  };
 
   const scheduler = new Scheduler(store, runner, () => paths().lock, retire);
 

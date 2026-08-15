@@ -134,6 +134,11 @@ library, visible, so you can fix it and run it again. Recurring plans never
 leave. Bringing one back is the **Import** button, and nothing in the archive is
 ever pruned.
 
+Change a plan's **Repeat** from Daily or Weekly back to Once and it stays in the
+library until it has run once on its own. The runs behind it were made while it
+was still repeating, and counting those would archive it the moment you switched
+it — before the single run you had just set up ever fired.
+
 Note that pressing **Run now** on a one-shot archives it as soon as it completes,
 even if its scheduled time has not arrived — the plan is leaving the library, so
 that occurrence is consumed with it rather than firing later out of a folder you

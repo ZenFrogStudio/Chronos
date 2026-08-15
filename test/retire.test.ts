@@ -64,13 +64,19 @@ function series(id: string, filePath: string, overrides: Partial<TaskSeries> = {
   };
 }
 
-function run(id: string, seriesId: string, status: RunStatus): TaskRun {
+function run(
+  id: string,
+  seriesId: string,
+  status: RunStatus,
+  overrides: Partial<TaskRun> = {}
+): TaskRun {
   return {
     id,
     seriesId,
     scheduledAt: '2026-01-01T09:00:00.000Z',
     status,
-    attempt: 1
+    attempt: 1,
+    ...overrides
   };
 }
 
@@ -123,6 +129,59 @@ describe('retire — a one-shot that has run', () => {
     assert.deepEqual(report.archived, []);
     assert.equal(fs.existsSync(plan.filePath), true);
     assert.equal(store.byId('a')?.filePath, plan.filePath);
+  });
+});
+
+describe('retire — a plan that has stopped repeating', () => {
+  it('should_leave_a_plan_that_only_ran_before_its_repeat_rule_was_removed', async () => {
+    // Switch Repeat from Weekly to Once and the series is a one-shot with a pile
+    // of completed runs behind it. Those runs were made under a rule it no
+    // longer has, so archiving on them would take the plan out of the library
+    // before the one-shot occurrence the user just set had fired.
+    const plan = createPlan(dir, 'Was Weekly');
+    const store = new FakeStore(
+      [series('a', plan.filePath, { repeatEndedAt: '2026-02-01T00:00:00.000Z' })],
+      [run('r1', 'a', 'completed', { startedAt: '2026-01-20T09:00:00.000Z' })]
+    );
+
+    const report = await retireCompletedPlans(store, dir, archive);
+
+    assert.deepEqual(report.archived, []);
+    assert.equal(fs.existsSync(plan.filePath), true);
+    assert.equal(store.byId('a')?.spent, undefined);
+  });
+
+  it('should_archive_a_plan_that_has_run_since_its_repeat_rule_was_removed', async () => {
+    const plan = createPlan(dir, 'Was Weekly');
+    const store = new FakeStore(
+      [series('a', plan.filePath, { repeatEndedAt: '2026-02-01T00:00:00.000Z' })],
+      [
+        run('r1', 'a', 'completed', { startedAt: '2026-01-20T09:00:00.000Z' }),
+        run('r2', 'a', 'completed', { startedAt: '2026-02-02T09:00:00.000Z' })
+      ]
+    );
+
+    const report = await retireCompletedPlans(store, dir, archive);
+
+    assert.deepEqual(report.archived, [{ planName: 'was-weekly.md', archivedAs: 'was-weekly.md' }]);
+    assert.equal(fs.existsSync(plan.filePath), false);
+    assert.ok(isInside(archive, store.byId('a')?.filePath ?? ''));
+  });
+
+  it('should_leave_a_plan_whose_run_has_no_start_time_to_place', async () => {
+    // A run with no start time cannot be put either side of the change. Kept, on
+    // the reasoning that a plan wrongly left in the library is a row in a list,
+    // while one wrongly archived has to be gone looking for.
+    const plan = createPlan(dir, 'Undated');
+    const store = new FakeStore(
+      [series('a', plan.filePath, { repeatEndedAt: '2026-02-01T00:00:00.000Z' })],
+      [run('r1', 'a', 'completed')]
+    );
+
+    const report = await retireCompletedPlans(store, dir, archive);
+
+    assert.deepEqual(report.archived, []);
+    assert.equal(fs.existsSync(plan.filePath), true);
   });
 });
 

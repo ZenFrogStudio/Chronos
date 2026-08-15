@@ -47,6 +47,11 @@ export interface RetirementReport {
  * The pending/running guard is the important one. A failed run queues a retry
  * an hour out, and that retry needs the file — archiving between the failure and
  * the retry would pull the plan out from under it.
+ *
+ * A plan that has *stopped* repeating stays too, until it has run again. The
+ * completed runs behind it were made under a rule it no longer has, so counting
+ * them would archive it the moment Repeat was switched to Once — with the
+ * one-shot occurrence the user just set still waiting to fire.
  */
 export function retirable(
   series: readonly TaskSeries[],
@@ -60,8 +65,33 @@ export function retirable(
     if (own.some((r) => r.status === 'pending' || r.status === 'running')) {
       return false;
     }
-    return own.some((r) => r.status === 'completed');
+    return own.some((r) => r.status === 'completed' && ranSinceItStoppedRepeating(s, r));
   });
+}
+
+/**
+ * Whether a completed run counts as the one-shot's own run. A series that has
+ * never repeated has nothing to compare against, so every completed run counts —
+ * which is the ordinary case and keeps today's behaviour for it. A run with no
+ * start time cannot be placed either side of the change and is treated as
+ * older: a plan wrongly kept is a row in a list, a plan wrongly archived is one
+ * the user has to go looking for.
+ */
+function ranSinceItStoppedRepeating(series: TaskSeries, run: TaskRun): boolean {
+  if (!series.repeatEndedAt) {
+    return true;
+  }
+  const ended = Date.parse(series.repeatEndedAt);
+  if (Number.isNaN(ended)) {
+    return true;
+  }
+  // `startedAt` rather than `finishedAt`, so a rule removed while a run was in
+  // flight does not archive the plan on the strength of that run.
+  const started = run.startedAt ? Date.parse(run.startedAt) : NaN;
+  if (Number.isNaN(started)) {
+    return false;
+  }
+  return started >= ended;
 }
 
 /**

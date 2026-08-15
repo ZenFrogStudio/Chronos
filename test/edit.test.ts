@@ -38,6 +38,16 @@ describe('edit — fields that must never be settable', () => {
     assert.deepEqual(rejected, ['somethingElse']);
   });
 
+  it('should_refuse_a_patch_that_tries_to_set_repeatEndedAt', () => {
+    // Bookkeeping written by `stampRepeatEnd`, not a field anyone edits. A
+    // webview that could set it could date a plan's move to one-shot into the
+    // future and hold it in the library for good.
+    const { patch, rejected } = seriesEdit({ repeatEndedAt: '2099-01-01T00:00:00.000Z' });
+
+    assert.deepEqual(patch, {});
+    assert.deepEqual(rejected, ['repeatEndedAt']);
+  });
+
   it('should_reject_a_patch_that_is_not_an_object', () => {
     assert.deepEqual(seriesEdit('enabled=true').patch, {});
     assert.deepEqual(seriesEdit(null).patch, {});

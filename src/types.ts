@@ -72,6 +72,16 @@ export interface TaskSeries {
    * that has not found a concurrency slot yet.
    */
   spent?: boolean;
+  /**
+   * When this series last had its repeat rule removed, ISO 8601 UTC. Absent
+   * means it has never repeated, or repeats now. Read only by `retire.ts`: a
+   * plan that ran weekly for a month arrives at the archive test with a pile of
+   * completed runs, and without this the sweep would move it out of the library
+   * the moment Repeat was set to Once — before the one-shot occurrence had a
+   * chance to fire. Optional and additive, like `agent` and `dayOfMonth` above,
+   * so it needs no migration and no SCHEMA_VERSION bump.
+   */
+  repeatEndedAt?: string;
   maxRetries: number;
   createdAt: string;
 }

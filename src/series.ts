@@ -49,6 +49,33 @@ export function defaultScheduledAt(from: Date = new Date()): string {
   return target.toISOString();
 }
 
+/**
+ * Stamps `repeatEndedAt` when a patch takes a repeat rule away, and clears it
+ * when a patch puts one back. Applied at every writer of a series so the two
+ * processes cannot disagree about when a plan became a one-shot.
+ *
+ * `retire.ts` reads the stamp to decide whether the completed runs behind a
+ * plan were made under a rule it no longer has — a plan switched from Weekly to
+ * Once would otherwise be archived on the strength of runs it made while it was
+ * still repeating, before its one-shot occurrence ever fired.
+ */
+export function stampRepeatEnd(
+  current: TaskSeries,
+  patch: Partial<TaskSeries>,
+  now: string = nowUtc()
+): Partial<TaskSeries> {
+  if (patch.recurrence === null && current.recurrence) {
+    return { ...patch, repeatEndedAt: now };
+  }
+  if (patch.recurrence) {
+    // A series that repeats again has no end. `Object.assign` writes the key as
+    // `undefined` and `JSON.stringify` drops it, which is how it leaves
+    // `state.json` rather than lingering as a stale date.
+    return { ...patch, repeatEndedAt: undefined };
+  }
+  return patch;
+}
+
 export function createSeries(
   filePath: string,
   defaults: SeriesDefaults,

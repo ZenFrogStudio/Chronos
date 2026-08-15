@@ -275,6 +275,42 @@ logic out; one of the moves also narrowed a guard.
 
 ### Fixed
 
+- **A plan switched off a repeat rule vanished from the library before it ever
+  ran as a one-shot.** Recurring plans were already held in the library — the
+  archive sweep refuses any series with a repeat rule — but the moment you
+  changed **Repeat** from Weekly to Once, that protection was gone and the pile
+  of completed runs the plan had made *while* it was repeating was suddenly a
+  pile of completed runs behind a one-shot. The very next sweep archived it:
+  activation, a folder switch, or any finished run anywhere in the folder. The
+  single occurrence you had just set never fired, and the plan was out of the
+  list before you saw it there.
+
+  Second way to lose one: two windows open on the same folder, only one of them
+  holding the scheduler lock. The store keeps the schedule in memory and only
+  re-reads on its own writes, so setting **Repeat = Daily** in window B left
+  window A still seeing a one-shot — and when a run finished there, window A
+  archived a plan that now repeats. Every *field* write is protected by a
+  read-modify-write against the file on disk; moving the file itself was not, so
+  nothing downstream caught the mistake.
+
+  A series now records when its repeat rule was removed, and the sweep only
+  counts a completed run that started after that — so a plan that stops
+  repeating stays in the library until it has run once on its own. The stamp is
+  applied wherever a series is written, the extension and the MCP server alike,
+  so the two processes cannot disagree about when a plan became a one-shot; a
+  run with no start time cannot be placed either side of the change and is
+  treated as older, on the reasoning that a plan wrongly kept is a row in a list
+  while one wrongly archived has to be gone looking for. The sweep also re-reads
+  the schedule from disk before it moves anything, which closes the two-window
+  case. One new optional field, so nothing needed migrating.
+
+  This does not bring back plans already sitting in `.chronos/archive/plans`.
+  Their series all read `recurrence: null` and `spent: true`, and no automatic
+  rule can tell which of those you thought of as repeating. They are recoverable
+  by hand exactly as the README describes: the **Import** button, or copy the
+  file back into `.chronos/plans`. Nothing in the archive is ever pruned, so they
+  are all still there.
+
 - **Generate plan lost its instruction entirely whenever no model was pinned.**
   The command ended `--add-dir <library> <instruction>`, and the CLI declares
   `--add-dir` variadic (`<directories...>`), so it went on swallowing arguments

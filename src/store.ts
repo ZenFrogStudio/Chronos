@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { pruneRuns } from './history';
 import { log } from './log';
-import { newId } from './series';
+import { newId, stampRepeatEnd } from './series';
 import { readState, updateState } from './state-file';
 import { ChronosState, SCHEMA_VERSION, TaskRun, TaskSeries } from './types';
 
@@ -103,7 +103,10 @@ export class Store {
         log.warn(`updateSeries: no series ${id}`);
         return;
       }
-      Object.assign(series, patch);
+      // Through `stampRepeatEnd` so a plan that stops repeating records when it
+      // did. One call covers the manager, the phone commands, the scheduler and
+      // `retire.ts` — every editor in this process is id-and-patch shaped.
+      Object.assign(series, stampRepeatEnd(series, patch));
     });
   }
 

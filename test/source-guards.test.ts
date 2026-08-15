@@ -353,6 +353,26 @@ describe('source guards', () => {
     assert.ok(tasks.includes("'--ask-only'"), 'src/tasks.ts no longer spawns with --ask-only');
   });
 
+  it('should_reload_the_schedule_before_deciding_what_to_archive', () => {
+    // The sweep moves plan files from what the schedule says, and the store only
+    // re-reads on its own writes. Set Repeat = Daily in a second window on this
+    // folder and this window can still hold `recurrence: null` when a run
+    // finishes — archiving a plan that now repeats. A file move is not covered
+    // by the read-modify-write that protects every field write, so nothing
+    // downstream would catch it. Only a live two-window session could show the
+    // ordering, which is why it is read out of the source here.
+    const extension = fs.readFileSync(path.join(SRC, 'extension.ts'), 'utf8');
+
+    const start = extension.indexOf('const retire =');
+    assert.ok(start > 0, 'src/extension.ts no longer defines the retire thunk');
+    const thunk = extension.slice(start, extension.indexOf('};', start));
+
+    const reload = thunk.indexOf('store.reload()');
+    const sweep = thunk.indexOf('retireCompletedPlans(');
+    assert.ok(reload > -1, 'the retire thunk no longer re-reads the schedule first');
+    assert.ok(reload < sweep, 'store.reload() must come before retireCompletedPlans()');
+  });
+
   it('should_ship_a_sash_element_for_every_sash_rule', () => {
     // The dividers are found by id, styled by class and never rendered by JS, so
     // a renamed id leaves the CSS styling nothing and the drag silently dead.
