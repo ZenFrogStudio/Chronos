@@ -600,6 +600,14 @@ select.field-input {
   color: var(--muted);
 }
 
+/* Under the heading rather than the control: what is true of every field in the
+   group, said once instead of once per field. */
+.section-note {
+  margin: -2px 0 10px;
+  font-size: 0.78em;
+  color: var(--muted);
+}
+
 /* A checkbox belongs beside its label, not under it. */
 .field-check {
   display: flex;

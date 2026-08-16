@@ -26,6 +26,8 @@ export interface SettingField {
 
 export interface SettingGroup {
   title: string;
+  /** Something true of every field under the heading, so no field has to repeat it. */
+  note?: string;
   fields: SettingField[];
 }
 
@@ -39,9 +41,10 @@ const PREFIX = 'chronos.';
  * Exported so a test can check it the other way round: a key left here after its
  * setting is deleted from the manifest drops out of `settingGroups` silently.
  */
-export const GROUPS: { title: string; keys: string[] }[] = [
+export const GROUPS: { title: string; note?: string; keys: string[] }[] = [
   {
     title: 'Planning',
+    note: 'These shape the plans Chronos generates from now on. Plans already in your library are untouched.',
     keys: [
       'planModel',
       'planStep.tests',
@@ -78,6 +81,7 @@ export function settingGroups(properties: Record<string, any>): SettingGroup[] {
 
   const groups: SettingGroup[] = GROUPS.map((group) => ({
     title: group.title,
+    note: group.note,
     fields: group.keys.flatMap((key) => {
       const prop = remaining.get(key);
       if (!prop) {

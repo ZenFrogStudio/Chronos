@@ -468,6 +468,21 @@ logic out; one of the moves also narrowed a guard.
 
 ### Changed
 
+- **Every setting now says what it does in one line (0.8.0-rc.61).** The manager's
+  **Settings** page printed a paragraph of help under each control, taken straight
+  from the configuration schema in `package.json`. Several ran past 400
+  characters, and all five plan-step toggles closed with the same sentence about
+  plans already in your library — so the controls sat buried in prose you had read
+  four times already, and the page could not be scanned.
+
+  The descriptions are shortened at their source in the manifest, which keeps the
+  single source of truth the page was built on and shortens VS Code's own Settings
+  editor at the same time. The caveats that were cut are not relocated: they are
+  already recorded in the project's plan text, and a second copy would only be a
+  second thing to keep in step. The one line worth keeping — that these settings
+  shape future plans, not existing ones — becomes a `note` on the group, said once
+  under the **Planning** heading instead of five times inside it.
+
 - **A generated plan now arrives in the library under a three-word name.**
   Chronos asks the planning session to name the plan after the change it makes,
   but never said how long that name should be — and its own worked example was

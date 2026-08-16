@@ -614,9 +614,11 @@
   }
 
   function settingGroup(group) {
+    const note = group.note ? `<p class="section-note">${esc(group.note)}</p>` : '';
     // Not `.grid`: help text under each control makes a multi-column layout ragged.
     return `<div class="section">
       <h3 class="section-title">${esc(group.title)}</h3>
+      ${note}
       <div class="settings">${group.fields.map(settingField).join('')}</div>
     </div>`;
   }

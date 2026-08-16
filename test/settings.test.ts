@@ -65,6 +65,17 @@ describe('settingGroups', () => {
     assert.equal(groups[0].fields[0].key, 'somethingNew');
   });
 
+  it('should_carry_a_group_note_onto_the_built_group', () => {
+    // The note is what stops the same closing sentence being repeated inside
+    // every planStep description.
+    const groups = settingGroups(PROPERTIES);
+    const planning = groups.find((g) => g.title === 'Planning');
+    const engines = groups.find((g) => g.title === 'Engines');
+
+    assert.ok(planning?.note);
+    assert.equal(engines?.note, undefined);
+  });
+
   it('should_label_a_camel_case_key_as_a_sentence', () => {
     assert.equal(fieldFor('planModel').label, 'Plan model');
     assert.equal(fieldFor('showTerminalOnRun').label, 'Show terminal on run');

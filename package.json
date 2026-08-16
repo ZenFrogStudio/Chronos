@@ -2,7 +2,7 @@
   "name": "chronos",
   "displayName": "Chronos",
   "description": "Schedule Claude Code tasks from Markdown plan files.",
-  "version": "0.8.0-rc.60",
+  "version": "0.8.0-rc.61",
   "publisher": "Z3n",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -123,17 +123,17 @@
         "chronos.opencodePath": {
           "type": "string",
           "default": "opencode",
-          "markdownDescription": "Path to the `opencode` executable, used by tasks whose **Engine** is set to opencode. Leave as `opencode` to resolve from PATH. If it does not answer `--version` on startup, opencode is simply not offered as an engine — it is not an error. opencode keeps its own provider logins; run `opencode providers login` to reach anything beyond its free hosted models."
+          "markdownDescription": "Path to the `opencode` executable, for tasks whose engine is opencode."
         },
         "chronos.libraryPath": {
           "type": "string",
           "default": "",
-          "markdownDescription": "Overrides where plans are kept. Leave empty for the default, `.chronos/plans` inside the folder you are working in — which is what makes each project's plans its own. Set here in *user* settings it points every project at one shared library again; set in *workspace* settings it moves just this project's. Changing it does not move existing plans, and already-scheduled tasks keep working either way, since they store absolute paths."
+          "markdownDescription": "Where plans are kept. Empty means `.chronos/plans` in the current folder."
         },
         "chronos.resultsPath": {
           "type": "string",
           "default": "",
-          "markdownDescription": "Overrides where run transcripts are written — one subfolder per plan, one Markdown file per run. Leave empty for the default, `.chronos/results` inside the folder you are working in. These are never deleted automatically, unlike raw logs."
+          "markdownDescription": "Where run transcripts are written. Empty means `.chronos/results` in the current folder."
         },
         "chronos.planModel": {
           "type": "string",
@@ -160,56 +160,56 @@
             "Sonnet (latest)",
             "Haiku (latest)"
           ],
-          "markdownDescription": "Model used whenever Chronos opens a planning session — the **Generate plan** button on a task in the **Tasks** view. Leave as **Account default** to let Claude choose. It does not affect scheduled runs, which use each plan's own model."
+          "markdownDescription": "Model used when Chronos generates a plan. Scheduled runs use each plan's own model."
         },
         "chronos.planStep.tests": {
           "type": "boolean",
           "default": false,
-          "markdownDescription": "Ask every generated plan to end by running the project test suite and getting it passing. Off by default: not every project has a suite worth running unattended. Affects plans Chronos generates from now on; plans already in your library are untouched."
+          "markdownDescription": "End every generated plan by running the project test suite."
         },
         "chronos.planStep.version": {
           "type": "boolean",
           "default": true,
-          "markdownDescription": "Ask every generated plan to end by bumping the project version. Without it an overnight run leaves new behaviour shipping under the old version number. Affects plans Chronos generates from now on; plans already in your library are untouched."
+          "markdownDescription": "End every generated plan by bumping the project version."
         },
         "chronos.planStep.changelog": {
           "type": "boolean",
           "default": true,
-          "markdownDescription": "Ask every generated plan to end by adding a matching changelog entry. Without it the only record of what the agent changed is the diff. Affects plans Chronos generates from now on; plans already in your library are untouched."
+          "markdownDescription": "End every generated plan by adding a changelog entry."
         },
         "chronos.planStep.rebuild": {
           "type": "boolean",
           "default": false,
-          "markdownDescription": "Ask every generated plan to end by rebuilding the project. Off by default: a build is slow, and most changes are verified by the tests rather than by the artefact. Affects plans Chronos generates from now on; plans already in your library are untouched."
+          "markdownDescription": "End every generated plan by rebuilding the project."
         },
         "chronos.planStep.reinstall": {
           "type": "boolean",
           "default": false,
-          "markdownDescription": "Ask every generated plan to end by reinstalling the project, so the build it just made is the one actually running. Off by default: only projects that install an artefact — an extension, a CLI, a packaged app — have anything to reinstall. Separate from **Rebuild**, but only useful alongside it: reinstalling without rebuilding reinstalls the old build. Affects plans Chronos generates from now on; plans already in your library are untouched."
+          "markdownDescription": "End every generated plan by reinstalling the project it just built."
         },
         "chronos.planStep.commit": {
           "type": "boolean",
           "default": true,
-          "markdownDescription": "Ask every generated plan to end by committing the result to git. Without it an unattended run finishes with an untracked working tree and no record of what changed. Commit only — nothing is pushed. Affects plans Chronos generates from now on; plans already in your library are untouched."
+          "markdownDescription": "End every generated plan by committing the result to git."
         },
         "chronos.showTerminalOnRun": {
           "type": "boolean",
           "default": true,
-          "description": "Reveal the terminal panel when a task starts. Focus is left where it is. Turn off if scheduled runs interrupt you."
+          "description": "Reveal the terminal panel when a task starts."
         },
         "chronos.maxConcurrent": {
           "type": "number",
           "default": 1,
           "minimum": 1,
           "maximum": 5,
-          "description": "Maximum number of tasks running at once. Raise deliberately: parallel agents editing one repository will collide."
+          "description": "Tasks allowed to run at once. Parallel agents in one repository will collide."
         },
         "chronos.maxRetries": {
           "type": "number",
           "default": 3,
           "minimum": 0,
           "maximum": 10,
-          "description": "Retry attempts after a failed run before the task is given up on."
+          "description": "Retry attempts after a failed run."
         },
         "chronos.retryDelayMinutes": {
           "type": "number",
@@ -221,7 +221,7 @@
           "type": "number",
           "default": 15,
           "minimum": 0,
-          "description": "How late a task may fire and still run. Beyond this it is marked missed and waits for your decision instead of running unattended."
+          "description": "How late a task may fire and still run."
         },
         "chronos.idleTimeoutMinutes": {
           "type": "number",
@@ -233,13 +233,13 @@
           "type": "number",
           "default": 60,
           "minimum": 1,
-          "description": "Hard wall-clock ceiling on a single run."
+          "description": "Hard ceiling on a single run."
         },
         "chronos.logRetentionDays": {
           "type": "number",
           "default": 30,
           "minimum": 1,
-          "markdownDescription": "Delete raw run logs older than this on startup. This does not touch the Markdown transcripts in `chronos.resultsPath`, which are kept indefinitely."
+          "markdownDescription": "Delete raw run logs older than this on startup."
         }
       }
     }
