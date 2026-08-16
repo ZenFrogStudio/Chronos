@@ -22,6 +22,7 @@
     "src/launch.ts",
     "src/library.ts",
     "src/lock.ts",
+    "src/mcp-clients.ts",
     "src/mcp-tools.ts",
     "src/migrate.ts",
     "src/outcome.ts",

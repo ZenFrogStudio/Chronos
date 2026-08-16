@@ -273,6 +273,59 @@ describe('source guards', () => {
     );
   });
 
+  it('should_carry_read_write_hints_on_every_mcp_tool', () => {
+    // Clients read these to decide what they can run without asking — Codex's
+    // `default_tools_approval_mode = "writes"`, VS Code and Cursor all do. A tool
+    // registered without them is treated as the most dangerous thing it could
+    // be, so listing the schedule costs the user a prompt every time. Nothing
+    // errors, and no unit test can see it: the annotations only exist in the tool
+    // list a client fetches over the wire.
+    const server = fs.readFileSync(path.join(SRC, 'mcp-server.ts'), 'utf8');
+
+    const registrations = (server.match(/registerTool\(/g) ?? []).length;
+    const annotated = (server.match(/^\s+annotations: /gm) ?? []).length;
+
+    assert.ok(registrations > 0, 'src/mcp-server.ts registers no tools at all');
+    assert.equal(
+      annotated,
+      registrations,
+      `${registrations} tools are registered but ${annotated} carry annotations`
+    );
+
+    // The hints have to say something, not merely be present. Unschedule is the
+    // one call that destroys anything — it drops a series and its run history —
+    // and a client that is not told so will wave it through.
+    assert.match(server, /destructiveHint: true/, 'nothing is marked destructive any more');
+    assert.match(server, /readOnlyHint: true/, 'nothing is marked read-only any more');
+  });
+
+  it('should_hand_out_the_update_proof_mcp_path_rather_than_the_versioned_one', () => {
+    // `extensionUri` names the folder VS Code installed *this version* into, so
+    // a config copied from it stops working the next time Chronos updates. The
+    // client goes on spawning a file that is no longer there and reports a
+    // perfectly healthy failure to connect, which nobody traces back to an
+    // update. The launcher under globalStorage is the path that survives.
+    const extension = fs.readFileSync(path.join(SRC, 'extension.ts'), 'utf8');
+
+    const start = extension.indexOf('async function copyMcpConfig');
+    assert.ok(start > 0, 'src/extension.ts no longer defines copyMcpConfig');
+    const body = extension.slice(start, extension.indexOf('\n}', start));
+
+    assert.ok(
+      !body.includes("'dist', 'mcp-server.js'"),
+      'copyMcpConfig must take its path from mcpLauncherPath, not build a versioned one'
+    );
+    assert.match(
+      extension,
+      /const mcpLauncher = mcpLauncherPath\(context\)/,
+      'activate() no longer writes the MCP launcher, so it never re-points after an update'
+    );
+    assert.ok(
+      extension.includes('globalStorageUri'),
+      'the launcher must live under globalStorage, which is not keyed by version'
+    );
+  });
+
   it('should_never_write_to_stdout_from_the_mcp_server', () => {
     // stdout *is* the JSON-RPC transport. One `console.log` anywhere on this
     // side interleaves with a reply and corrupts the protocol mid-session —
@@ -291,9 +344,13 @@ describe('source guards', () => {
     // it — builds fine and then throws MODULE_NOT_FOUND at the client's first
     // connection attempt. esbuild catches the direct case, this catches the
     // transitive one before the build does.
+    //
+    // `mcp-clients.ts` is on the list for the sibling reason: nothing spawns it,
+    // but the plain Node test runner loads it, and an import of `vscode` there
+    // takes its whole test file down rather than failing one assertion.
     const reachable = ['mcp-server.ts', 'mcp-tools.ts', 'series.ts', 'library.ts', 'roots.ts',
       'state-file.ts', 'edit.ts', 'recurrence.ts', 'types.ts', 'time.ts', 'agents.ts', 'migrate.ts',
-      'questions.ts'];
+      'questions.ts', 'mcp-clients.ts'];
 
     for (const name of reachable) {
       const source = fs.readFileSync(path.join(SRC, name), 'utf8');

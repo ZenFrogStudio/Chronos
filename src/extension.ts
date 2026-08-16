@@ -7,6 +7,7 @@ import { consolidate } from './consolidate';
 import { seedLibrary } from './library';
 import { initLog, log, logConsolidation, logRetirement, pruneLogs } from './log';
 import { Manager } from './manager';
+import { MCP_CLIENTS } from './mcp-clients';
 import { migrate } from './migrate';
 import { sweepQuestions } from './questions';
 import { retireCompletedPlans } from './retire';
@@ -161,6 +162,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   stateWatcher.restart();
 
+  // Re-pointed at this install every activation, so configs already registered
+  // in other clients keep working across an update. See `mcpLauncherPath`.
+  const mcpLauncher = mcpLauncherPath(context);
+
   context.subscriptions.push(
     store,
     runner,
@@ -207,7 +212,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       taskView.generatePlanRemotely()
     ),
     vscode.commands.registerCommand('chronos.copyMcpConfig', () =>
-      copyMcpConfig(context, paths().folder)
+      copyMcpConfig(mcpLauncher, paths().folder)
     )
   );
 
@@ -306,33 +311,92 @@ class StateWatcher implements vscode.Disposable {
 }
 
 /**
+ * The path a client config points at — one that survives an update.
+ *
+ * `extensionUri` names the *versioned* install folder, so a config written
+ * against it breaks silently the next time Chronos updates: the client goes on
+ * spawning a file that is no longer there, and the only symptom is tools that
+ * quietly stop appearing. `globalStorageUri` is keyed by publisher and extension
+ * id rather than by version, so it is the one path that does not move.
+ *
+ * What is written there is a shim that `require`s the real bundle of whichever
+ * install is currently running — requiring it *is* starting the server, since
+ * the bundle serves on load. It is rewritten on every activation, which is what
+ * re-points it after an update, and only when the content actually differs, so
+ * ordinary start-up does not churn the disk.
+ *
+ * If the write fails, the real path is returned instead: the command degrades to
+ * what it did before this existed rather than stopping working.
+ */
+function mcpLauncherPath(context: vscode.ExtensionContext): string {
+  const real = vscode.Uri.joinPath(context.extensionUri, 'dist', 'mcp-server.js').fsPath;
+  const dir = context.globalStorageUri.fsPath;
+  const launcher = path.join(dir, 'mcp-server.js');
+
+  // stderr, never stdout: stdout is the JSON-RPC transport, and one line on it
+  // corrupts the handshake. A client connecting after Chronos was uninstalled
+  // should be told so and see the process end, rather than hang.
+  const shim =
+    `const target = ${JSON.stringify(real)};\n` +
+    'if (!require(\'fs\').existsSync(target)) {\n' +
+    '  process.stderr.write(`[chronos-mcp] ${target} is missing — Chronos was moved or ' +
+    'uninstalled. Re-run "Chronos: Copy MCP Server Config..." from VS Code.\\n`);\n' +
+    '  process.exit(1);\n' +
+    '}\n' +
+    'require(target);\n';
+
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    if (readIfPresent(launcher) !== shim) {
+      fs.writeFileSync(launcher, shim, 'utf8');
+      log.info(`pointed the MCP launcher at ${real}`);
+    }
+    return launcher;
+  } catch (err) {
+    log.warn(`could not write the MCP launcher, using the versioned path instead: ${String(err)}`);
+    return real;
+  }
+}
+
+/** A file that is not there yet is not an error here — it just needs writing. */
+function readIfPresent(filePath: string): string | undefined {
+  try {
+    return fs.readFileSync(filePath, 'utf8');
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Puts a ready-to-paste MCP client entry on the clipboard.
  *
- * Configuring an agent needs the absolute path to `dist/mcp-server.js` inside
- * whichever versioned folder VS Code installed this extension into, which is not
- * something anyone should have to go looking for. `extensionUri` is the only
- * place that path is known for certain.
+ * The shapes clients want differ enough that one snippet cannot serve them all,
+ * so this asks which client first and copies that client's own format. `where`
+ * is the whole answer to "and now what do I do with it", so it is both the
+ * detail line in the picker and the first thing said afterwards.
  */
-async function copyMcpConfig(
-  context: vscode.ExtensionContext,
-  folder: string
-): Promise<void> {
-  const serverPath = vscode.Uri.joinPath(context.extensionUri, 'dist', 'mcp-server.js').fsPath;
-  const snippet = JSON.stringify(
-    {
-      mcpServers: {
-        chronos: { command: 'node', args: [serverPath, '--folder', folder] }
-      }
-    },
-    null,
-    2
+async function copyMcpConfig(serverPath: string, folder: string): Promise<void> {
+  const picked = await vscode.window.showQuickPick(
+    MCP_CLIENTS.map((client) => ({ label: client.label, detail: client.where, client })),
+    { placeHolder: 'Which client are you registering Chronos with?' }
   );
+  if (!picked) {
+    return; // Cancelled. Nothing copied, so the clipboard is left as it was.
+  }
 
-  await vscode.env.clipboard.writeText(snippet);
-  void vscode.window.showInformationMessage(
-    `Copied the Chronos MCP config for ${path.basename(folder)}. Paste it into your agent's ` +
-      'MCP settings, or run: claude mcp add chronos -- node "<path>" --folder "<folder>"'
-  );
+  const { client } = picked;
+  await vscode.env.clipboard.writeText(client.config(serverPath, folder));
+
+  const said = [
+    `Copied the Chronos MCP config for ${path.basename(folder)}. Paste it into ${client.where}.`
+  ];
+  if (client.cli) {
+    said.push(`Or run: ${client.cli(serverPath, folder)}`);
+  }
+  if (client.note) {
+    said.push(client.note);
+  }
+  void vscode.window.showInformationMessage(said.join(' '));
 }
 
 /**

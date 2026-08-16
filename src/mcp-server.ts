@@ -28,7 +28,7 @@ import { ChronosState, TaskRun, TaskSeries } from './types';
 /**
  * Chronos as an MCP server: the door any coding agent drives it through.
  *
- * Spawned as a child process by the agent (Claude Code, Hermes, Cursor), scoped
+ * Spawned as a child process by the agent (Claude Code, Codex, Cursor), scoped
  * to one project folder given as `--folder`, and speaking JSON-RPC over stdio.
  * It never talks to VS Code and never opens a port — it reads and writes the
  * same `.chronos` tree the extension does, and the open window notices.
@@ -237,12 +237,35 @@ const server = new McpServer(
  */
 const fullSurface = ASK_ONLY ? undefined : server;
 
+/**
+ * The standard MCP hints, which are what a client reads to decide what it can
+ * wave through without asking. Codex's `default_tools_approval_mode = "writes"`,
+ * VS Code and Cursor all use them; without them, reading the schedule is treated
+ * as warily as rewriting it, and every listing costs the user a prompt.
+ *
+ * They are hints about intent and change nothing about what this server permits.
+ * The `permissionMode` refusal in `mcp-tools.ts` remains the actual boundary.
+ *
+ * `openWorldHint` is false on all fifteen: this server touches one local folder
+ * and never reaches the network.
+ */
+const READS = { readOnlyHint: true, openWorldHint: false } as const;
+
+/** A write nothing else can be derived from — calling it twice does it twice. */
+const WRITES = {
+  readOnlyHint: false,
+  destructiveHint: false,
+  idempotentHint: false,
+  openWorldHint: false
+} as const;
+
 // ---------- read ----------
 
 fullSurface?.registerTool(
   'list_plans',
   {
     title: 'List plans',
+    annotations: READS,
     description:
       'The Chronos plan library for this project: every Markdown plan that can be scheduled. ' +
       'Newest first. A plan is addressed by its `name` everywhere else in this server.',
@@ -263,6 +286,7 @@ fullSurface?.registerTool(
   'read_plan',
   {
     title: 'Read a plan',
+    annotations: READS,
     description: 'The Markdown body of one plan, by the name list_plans reports.',
     inputSchema: z.object({ name: z.string().describe('Plan file name, e.g. "nightly-audit.md"') })
   },
@@ -280,6 +304,7 @@ fullSurface?.registerTool(
   'list_tasks',
   {
     title: 'List captured tasks',
+    annotations: READS,
     description:
       'The capture inbox: one-line jobs noted down but not yet written up as a plan. ' +
       'These are what the Chronos sidebar shows.',
@@ -301,6 +326,7 @@ fullSurface?.registerTool(
   'list_schedule',
   {
     title: 'List the schedule',
+    annotations: READS,
     description:
       'Every scheduled series in this project: which plan it runs, when it runs next, whether ' +
       'it repeats, and what it runs as. Use the `id` for update_schedule and unschedule.',
@@ -313,6 +339,7 @@ fullSurface?.registerTool(
   'list_runs',
   {
     title: 'List runs',
+    annotations: READS,
     description:
       'Recent run history — what actually happened when a scheduled task fired, including ' +
       'cost, permission denials and the agent’s closing message.',
@@ -334,6 +361,7 @@ fullSurface?.registerTool(
   'read_transcript',
   {
     title: 'Read a run transcript',
+    annotations: READS,
     description:
       'The full Markdown transcript of a finished run: what the agent was asked, what it did, ' +
       'and how it ended. Only finished runs have one.',
@@ -361,6 +389,7 @@ fullSurface?.registerTool(
   'add_task',
   {
     title: 'Capture a task',
+    annotations: WRITES,
     description:
       'Notes a one-line job into the Chronos inbox, where it appears in the sidebar of any open ' +
       'VS Code window on this project. Capture only — nothing is scheduled and nothing runs.',
@@ -381,6 +410,7 @@ fullSurface?.registerTool(
   'add_plan',
   {
     title: 'Write a plan',
+    annotations: WRITES,
     description:
       'Writes a Markdown plan into the library. This is what a scheduled run hands the coding ' +
       'agent as its prompt, so write it as instructions. Does not schedule it — call ' +
@@ -401,6 +431,7 @@ fullSurface?.registerTool(
   'schedule_plan',
   {
     title: 'Schedule a plan',
+    annotations: WRITES,
     description:
       'Puts a plan on the schedule. The open VS Code window fires it at the time given — this ' +
       'does not run anything now. New tasks always run in `auto` permission mode; that cannot ' +
@@ -483,6 +514,14 @@ fullSurface?.registerTool(
   'update_schedule',
   {
     title: 'Change a schedule',
+    // Idempotent: it sets fields to the values given, so repeating the same call
+    // leaves the same series in the same state.
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false
+    },
     description:
       'Reschedules, re-repeats, pauses or resumes an existing series. Permission mode cannot be ' +
       'changed from here.',
@@ -557,6 +596,14 @@ fullSurface?.registerTool(
   'unschedule',
   {
     title: 'Unschedule a task',
+    // The only tool here that destroys anything: it drops the series *and* its
+    // run history, and nothing brings either back.
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: false
+    },
     description:
       'Removes a series from the schedule, together with its run history. The plan file itself ' +
       'is untouched and can be scheduled again. To stop a task without losing its history, call ' +
@@ -628,11 +675,13 @@ server.registerTool(
   'ask_user',
   {
     title: 'Ask the user a question',
+    annotations: WRITES,
     description:
       'Puts a question to the user and waits for the answer. Use this when nobody is at the ' +
       'terminal you are running in — the question is written into this project so it can be ' +
       'answered from another device. Blocks until it is answered or the wait runs out; if it ' +
-      'runs out, call again with the `id` you get back to keep waiting.',
+      'runs out, call again with the `id` you get back to keep waiting. If your client cuts ' +
+      'tool calls off sooner than this waits, pass a smaller `waitSeconds` and call again.',
     inputSchema: z.object({
       summary: z
         .string()
@@ -703,8 +752,9 @@ server.registerTool(
 
     return reply(
       `No answer yet after ${wait} seconds. The question id is ${questionId}. Call ask_user ` +
-        `again with id: "${questionId}" to keep waiting. If that keeps happening, ask in the ` +
-        'terminal instead.'
+        `again with id: "${questionId}" to keep waiting. If your client times a tool call out ` +
+        'before the wait ends, pass a smaller `waitSeconds` as well. If that keeps happening, ' +
+        'ask in the terminal instead.'
     );
   }
 );
@@ -713,6 +763,7 @@ fullSurface?.registerTool(
   'list_questions',
   {
     title: 'List questions waiting for an answer',
+    annotations: READS,
     description:
       'Questions a Chronos planning session has asked and is still waiting on, newest first. ' +
       'Answer one with answer_question.',
@@ -743,6 +794,7 @@ fullSurface?.registerTool(
   'answer_question',
   {
     title: 'Answer a question',
+    annotations: WRITES,
     description:
       'Records the answers to a question from list_questions, which is what unblocks the ' +
       'planning session waiting on it. Every question in the set must be answered in one ' +
@@ -794,6 +846,7 @@ if (PENDING) {
     'submit_plan',
     {
       title: 'Submit the finished plan',
+      annotations: WRITES,
       description:
         'Delivers the finished plan to Chronos, which files it in this project’s plan library ' +
         'and clears the task it came from. Call this instead of writing the plan to a file ' +

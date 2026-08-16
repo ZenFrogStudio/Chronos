@@ -194,28 +194,68 @@ deleted automatically.
 ## Connecting an agent
 
 Chronos speaks the Model Context Protocol, so any MCP-capable coding agent —
-Claude Code, Hermes, Cursor — can drive the authoring half of the pipeline
+Claude Code, Codex, Cursor, Copilot — can drive the authoring half of the pipeline
 itself: capture a task, write it up as a plan, and put it on the schedule. The
 open VS Code window picks the schedule up and runs it that night, with the
 transcript landing in `.chronos/results` exactly as if you had scheduled it by
 hand.
 
 The server is a small Node process the agent spawns, scoped to one project
-folder. No ports, no tokens, and it works with VS Code closed — the writes land
-on disk and fire when a window next opens.
+folder. It works with VS Code closed — the writes land on disk and fire when a
+window next opens. **There is still no port and no token**: the server speaks
+over stdio to the process that started it, so nothing about registering it opens
+anything to the network, and nothing leaves the machine.
 
-Run **Chronos: Copy MCP Server Config** from the command palette to get the
-absolute paths for your install on the clipboard, then register it:
+### Registering it
+
+Run **Chronos: Copy MCP Server Config...** from the command palette, pick your
+client from the list, and paste what lands on the clipboard into the file it
+names. Each client wants a different shape, and Chronos writes the one yours
+wants rather than a snippet you have to translate:
+
+| Client | Paste it into |
+|---|---|
+| Claude Code | `.mcp.json` in the project root |
+| Claude Desktop | `claude_desktop_config.json` |
+| Codex CLI / ChatGPT desktop | `~/.codex/config.toml` |
+| Gemini CLI | `~/.gemini/settings.json` |
+| Cursor | `.cursor/mcp.json`, or `~/.cursor/mcp.json` for every project |
+| VS Code / Copilot | `.vscode/mcp.json` |
+| Windsurf | `~/.codeium/windsurf/mcp_config.json` |
+| opencode | `opencode.json` in the project root |
+
+Claude Code and Codex also get a one-line CLI equivalent in the message that
+follows, if you would rather not edit a file:
 
 ```bash
-claude mcp add chronos -- node "<ext>/dist/mcp-server.js" --folder "<project>"
-
-hermes mcp add chronos --command node --args "<ext>/dist/mcp-server.js" --folder "<project>"
+claude mcp add chronos -- node "<launcher>" --folder "<project>"
+codex  mcp add chronos -- node "<launcher>" --folder "<project>"
 ```
 
-For Hermes, `--args` must come last — everything after it is passed to the
-server rather than read as a Hermes flag. `hermes mcp test chronos` confirms the
-connection and lists the tools in one command.
+Three things are worth knowing about particular clients. VS Code is the only one
+that uses `servers` rather than `mcpServers`, and its MCP tools only run in
+**Agent** mode. Claude Desktop installed from the Microsoft Store keeps its
+config under `%LOCALAPPDATA%\Packages\…\LocalCache\Roaming\Claude` rather than
+`%APPDATA%\Claude`. And Codex needs its `tool_timeout_sec` raised, which is
+covered below.
+
+**The path you paste does not change when Chronos updates.** VS Code installs an
+extension into a folder named after its version, so a config pointing straight at
+`dist/mcp-server.js` breaks on every update — silently, because the client goes on
+starting a file that is no longer there and simply lists no tools. What Chronos
+copies instead is a small launcher in its own storage folder, which is not keyed
+by version and is re-pointed at the current install each time the extension
+starts. Register it once and it keeps working.
+
+**Long waits, and clients that cut them off.** `ask_user` blocks for up to four
+minutes waiting for an answer. Claude Code has no tool timeout and is fine as it
+is; Codex defaults to 60 seconds and Gemini to 10 minutes, so the configs Chronos
+copies for those two set the timeout explicitly (`tool_timeout_sec = 300` and
+`"timeout": 300000`). On any client that still cuts a call off, pass a smaller
+`waitSeconds` — the tool hands back a question id, and calling it again with that
+id picks the wait back up where it left off.
+
+### The tools
 
 Fifteen tools, seven that read and eight that write:
 
@@ -228,6 +268,12 @@ Fifteen tools, seven that read and eight that write:
 | `schedule_plan` `update_schedule` `unschedule` | The schedule |
 | `list_questions` `answer_question` | Planning sessions waiting on you |
 | `ask_user` `submit_plan` | Used *by* a planning session — see below |
+
+Each one carries the standard MCP hints, so a client that decides for itself what
+to auto-approve can tell reading the schedule from rewriting it. `unschedule` is
+the only one marked destructive — it drops a series together with its run
+history. The hints are advice to the client and change nothing about what the
+server permits; the rule below is the actual boundary.
 
 **An agent cannot set a task's permission mode.** New tasks get the ordinary
 `auto` default, and raising one to `bypassPermissions` stays a decision you make
@@ -262,7 +308,7 @@ routed session has to run in `default` mode. That is a real trade, and it should
 be a choice you make on the way out rather than one a default makes for you.
 
 Register the server for the project in whichever client you want to answer from
-(**Chronos: Copy MCP Server Config** gives you the paths). Then run the command
+(**Chronos: Copy MCP Server Config...** gives you the config). Then run the command
 and walk away. Ask the answering agent what Chronos is waiting on:
 
 - `list_questions` shows each open question, what the session is asking about,

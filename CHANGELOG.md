@@ -15,12 +15,44 @@ record of what the agent did overnight — sat below a 260px textarea, usually o
 screen. That redesign changed nothing outside `media/`: no logic, no message
 types, no storage.
 
+Also in this release: registering Chronos with a coding agent becomes picking
+your client from a list and pasting what it gives you, once. Eight clients, each
+getting the config shape it actually wants, pointed at a path that survives the
+next update.
+
 Also in this release: test coverage for three of the 0.8.0-rc.3 audit fixes that
 shipped without any, because they lived in modules that import `vscode` and
 cannot load in the plain Node test runner. Closing the gaps meant moving the
 logic out; one of the moves also narrowed a guard.
 
 ### Added
+
+- **Connecting Chronos to any MCP client, by picking it from a list.** The MCP
+  server was already client-neutral; the setup was not. **Chronos: Copy MCP
+  Server Config** copied one snippet in Claude's shape, and the README documented
+  two CLIs. Anyone driving Chronos from Codex, Gemini, Cursor, Copilot, Windsurf
+  or opencode had to know for themselves that Codex wants TOML in
+  `~/.codex/config.toml`, that VS Code is alone in using `servers` rather than
+  `mcpServers` and insists on `type: "stdio"`, and that opencode wants the whole
+  command as one array — and had to hand-translate the snippet each time.
+
+  The command is now a picker over eight clients, and copies the shape the one
+  you picked actually wants, naming the file to paste it into and the one-line
+  CLI equivalent where the client has one. There is still no HTTP endpoint, no
+  port and no token: the server stays stdio-only, and an off-machine device
+  reaches it the way it always has, by driving a client running on this PC.
+
+- **Read and write hints on all fifteen MCP tools.** Clients that decide for
+  themselves what to auto-approve — Codex's `default_tools_approval_mode`, VS
+  Code, Cursor — read the standard MCP annotations to do it. Without them, every
+  tool looks equally dangerous, so listing the schedule costs a prompt in exactly
+  the same way rewriting it does. The seven reads are now marked read-only, and
+  `unschedule` is the one call marked destructive, because it drops a series
+  together with its run history.
+
+  These are advice to the client and change nothing about what the server
+  permits. The `permissionMode` refusal is still the actual boundary: an agent
+  may author a plan over MCP and may not choose the permissions it runs under.
 
 - **A standing weekly security review.** Chronos runs a coding agent with
   filesystem and shell access, on a schedule, while nobody is at the machine. A
@@ -320,6 +352,20 @@ logic out; one of the moves also narrowed a guard.
   script's existence and its version lookup.
 
 ### Fixed
+
+- **A client config no longer breaks the next time Chronos updates.** VS Code
+  installs an extension into a folder named after its version, so the path the
+  copy command handed out — straight into `dist/mcp-server.js` — stopped existing
+  on every update. Nothing said so. The client went on spawning a file that was
+  no longer there and simply listed no tools, which reads as the server being
+  broken rather than as the config pointing at last week's install.
+
+  What Chronos copies now is a small launcher inside its own storage folder,
+  which is keyed by publisher and extension id rather than by version. It is
+  rewritten on each activation to point at whichever install is running, so a
+  config registered once keeps working across updates with no change. A launcher
+  whose target has gone — Chronos uninstalled, or moved — says so on stderr and
+  exits, rather than leaving the client hanging.
 
 - **Generate plan opens in plan mode again.** Routing a planning session's
   questions through the MCP back-channel costs plan mode — the two genuinely
