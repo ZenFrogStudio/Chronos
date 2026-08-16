@@ -406,4 +406,31 @@ describe('source guards', () => {
       assert.ok(js.includes(`'${id}'`), `media/manager.js never looks up #${id}`);
     }
   });
+
+  it('should_keep_the_plan_text_box_flexing_with_its_pane', () => {
+    // The box fills the detail pane by CSS alone, driven by classes written into
+    // a template string. Renaming either side reverts it to a fixed-height box
+    // with nothing thrown and no other test failing.
+    const css = fs.readFileSync(path.join(MEDIA, 'manager.css'), 'utf8');
+    const js = fs.readFileSync(path.join(MEDIA, 'manager.js'), 'utf8');
+
+    for (const cls of ['section is-editor', 'detail-lower']) {
+      assert.ok(js.includes(cls), `media/manager.js never renders .${cls}`);
+    }
+
+    for (const rule of [
+      '.section.is-editor',
+      '.section.is-editor.is-manual .editor',
+      '.detail-lower',
+    ]) {
+      assert.ok(css.includes(rule), `media/manager.css has no ${rule} rule`);
+    }
+
+    assert.ok(js.includes('is-manual'), 'media/manager.js never sets .is-manual');
+    assert.match(
+      css,
+      /\.detail\s*\{[^}]*flex-direction:\s*column/,
+      '.detail must be a flex column or the box cannot stretch'
+    );
+  });
 });

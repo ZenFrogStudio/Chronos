@@ -417,10 +417,22 @@ body.is-resizing .activity {
 
 /* --- Detail head --- */
 
+/* A flex column so the plan text box can absorb whatever height the library and
+   Runs sashes leave behind. `overflow-y` stays as the safety valve: on a very
+   short pane the box and the strip below it both hit their floors, and the pane
+   scrolls rather than clipping. */
 .detail {
   min-height: 0;
+  display: flex;
+  flex-direction: column;
   overflow-y: auto;
   padding: 16px 20px;
+}
+
+/* Only the plan text box gives or takes height. Everything else in the pane —
+   the header, the settings page, the empty states — keeps its natural size. */
+.detail > * {
+  flex: none;
 }
 
 .detail-head {
@@ -810,7 +822,7 @@ kbd {
 
 .editor {
   width: 100%;
-  min-height: 180px;
+  min-height: 100px;
   padding: 10px 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -821,6 +833,39 @@ kbd {
   line-height: 1.5;
   resize: vertical;
   tab-size: 2;
+}
+
+/* The Plan text section is the one part of the pane that stretches. It is a
+   column of its own so the heading and the saved/unsaved line keep their natural
+   height and the box takes the rest. No margin below it: the top border of the
+   first section in .detail-lower is the divider between the two halves. */
+.section.is-editor {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 200px;
+  margin-bottom: 0;
+}
+
+.section.is-editor .editor {
+  flex: 1;
+  min-height: 0;
+}
+
+/* Hand-dragged. The resize grip writes an inline height, and a flexed box with a
+   zero basis ignores it — dropping out of the flex is what lets the drag bite.
+   manager.js adds this class, and only for as long as the plan is on screen. */
+.section.is-editor.is-manual .editor {
+  flex: none;
+}
+
+/* Schedule and Runs, scrolling under the text box rather than after it, so they
+   stay on screen however tall the box gets. The cap is what stops a long run
+   history from squeezing the box back down to its floor. */
+.detail-lower {
+  max-height: 45%;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .editor-status {

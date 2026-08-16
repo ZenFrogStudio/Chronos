@@ -70,6 +70,10 @@
   /** Null means "whatever the stylesheet says", so nothing is written until dragged. */
   let libraryWidth = /** @type {number|null} */ (null);
   let activityHeight = /** @type {number|null} */ (null);
+  /* A height the resize grip was dragged to, in pixels. Deliberately not saved
+     with the sash sizes: the box is meant to size itself, and an override that
+     outlived the plan it was set on would quietly beat every later sash drag. */
+  let manualEditorHeight = /** @type {number|null} */ (null);
   /** Whether the detail pane is showing Settings instead of a plan. */
   let showSettings = false;
   /** A plan is addressed by name alone — no path from here ever reaches the
@@ -575,8 +579,10 @@
         </div>
       </div>
       ${editorSection()}
-      ${series ? scheduleSection(series) : unscheduledSection(plan)}
-      ${series ? runsSection(series) : ''}
+      <div class="detail-lower">
+        ${series ? scheduleSection(series) : unscheduledSection(plan)}
+        ${series ? runsSection(series) : ''}
+      </div>
     `;
 
     mountEditor(plan);
@@ -934,7 +940,7 @@
   }
 
   function editorSection() {
-    return `<div class="section">
+    return `<div class="section is-editor">
       <div class="section-head">
         <h3 class="section-title">Plan text</h3>
         <button class="link-button" type="button" data-action="open-editor">Open in editor ↗</button>
@@ -1163,6 +1169,37 @@
     }
     area.value = editor.text;
     paintEditorStatus();
+
+    const section = /** @type {HTMLElement} */ (area.closest('.section'));
+
+    /* renderDetail() replaces the pane on every state push from the host, not
+       just when you pick a plan — a run finishing is enough. Without this, the
+       box would snap back to auto under the pointer. */
+    if (manualEditorHeight !== null) {
+      area.style.height = `${manualEditorHeight}px`;
+      section.classList.add('is-manual');
+    }
+
+    /* The native grip is a corner of the textarea, not an element, so there is
+       nothing to bind to but the coordinates. Freezing the height the box has
+       right now and dropping it out of the flex is what makes the drag take
+       hold — a flexed box ignores the inline height the grip writes. */
+    area.addEventListener('pointerdown', (e) => {
+      const onGrip =
+        e.offsetX > area.clientWidth - 18 && e.offsetY > area.clientHeight - 18;
+      if (!onGrip) return;
+
+      area.style.height = `${area.offsetHeight}px`;
+      section.classList.add('is-manual');
+      // `once`, so nothing is left bound to the window when the drag ends.
+      window.addEventListener(
+        'pointerup',
+        () => {
+          manualEditorHeight = area.offsetHeight;
+        },
+        { once: true }
+      );
+    });
   }
 
   function paintEditorStatus() {
@@ -1900,6 +1937,7 @@
   function selectPlan(name) {
     if (name !== selected) {
       customModel = false;
+      manualEditorHeight = null;
       closePicker();
     }
     showSettings = false;

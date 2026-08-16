@@ -354,6 +354,18 @@ logic out; one of the moves also narrowed a guard.
 
 ### Changed
 
+- **The plan text box sizes itself to the pane.** It was a fixed 180px textarea
+  with a drag grip, sitting in a scrolling column between the plan header and the
+  Schedule and Runs sections. Dragging the Plan library or Runs sash resized the
+  pane around it and changed nothing about the box, so a taller window bought a
+  band of empty pane and the grip had to be dragged by hand to claim it. The
+  detail pane is now split: the box is pinned below the header and takes whatever
+  height the two sashes leave, and Schedule and Runs sit in their own scrolling
+  strip underneath so they stay on screen however tall the box gets. The grip is
+  still there and still wins when you use it, but only for the plan you dragged
+  it on — pick another and the box goes back to sizing itself. `media/` only: no
+  logic, no message types, no storage.
+
 - **New extension icon** (`media/icon.png`, 128×128) — the teal-and-orange
   ouroboros dragon, replacing the faceted sculpted head. It is the marketplace
   icon and the manager panel's tab icon. Source art is kept at
