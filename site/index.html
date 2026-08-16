@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chronos — schedule Claude Code tasks from Markdown plan files</title>
+<meta name="description" content="Chronos is a VS Code extension that runs the Claude Code CLI against your Markdown plan files on a schedule — once, daily or on chosen weekdays — and saves a transcript of every run.">
+<link rel="icon" href="img/favicon.png">
+<link rel="stylesheet" href="styles.css">
+
+<meta property="og:type" content="website">
+<meta property="og:title" content="Chronos — schedule Claude Code tasks from Markdown plan files">
+<meta property="og:description" content="Right-click a .md file, pick a time, and Chronos runs claude against it — once, daily or on chosen weekdays — saving a transcript of every run.">
+<!-- Swap this to an absolute https:// URL once the domain is settled. Some
+     scrapers will not resolve a relative og:image. -->
+<meta property="og:image" content="img/manager.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Chronos — schedule Claude Code tasks from Markdown plan files">
+<meta name="twitter:description" content="Right-click a .md file, pick a time, and Chronos runs claude against it — once, daily or on chosen weekdays — saving a transcript of every run.">
+<meta name="twitter:image" content="img/manager.png">
+</head>
+<body>
+
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="site-header">
+  <div class="wrap header-inner">
+    <a class="brand" href="#top">
+      <img src="img/chronos-mark.png" alt="">
+      Chronos
+    </a>
+    <nav class="header-nav" aria-label="Sections">
+      <a href="#manager">Manager</a>
+      <a href="#features">Features</a>
+      <a href="#unattended">Before you schedule</a>
+      <a href="#install">Install</a>
+    </nav>
+    <a class="btn btn-primary btn-small" href="https://marketplace.visualstudio.com/items?itemName=Z3n.chronos">Install</a>
+  </div>
+</header>
+
+<main id="main">
+
+  <section class="hero" id="top">
+    <div class="wrap">
+      <span class="hero-mark"><img src="img/chronos-mark.png" alt="The Chronos mark: an ouroboros dragon, teal above and amber below." width="120"></span>
+      <h1>Schedule Claude Code tasks from Markdown plan files, inside VS Code</h1>
+      <p class="lede">Right-click a <code>.md</code> file and choose <strong>Schedule with Chronos</strong>, pick a time, and Chronos runs <code>claude</code> against it — once, daily, or on chosen weekdays — saving a transcript of every run.</p>
+      <div class="hero-actions">
+        <a class="btn btn-primary" href="https://marketplace.visualstudio.com/items?itemName=Z3n.chronos">Install from the Marketplace</a>
+        <a class="btn btn-outline" href="https://github.com/ZenFrogStudio/Chronus/releases/latest">Download the .vsix</a>
+        <a class="btn btn-outline" href="https://github.com/ZenFrogStudio/Chronus">View on GitHub</a>
+      </div>
+      <p class="hero-facts mono">MIT · VS Code 1.93+ · requires the Claude Code CLI</p>
+    </div>
+  </section>
+
+  <section id="pipeline">
+    <div class="wrap">
+      <h2>From a passing thought to a run that happened while you slept</h2>
+      <p class="lede">Four steps, and you can join at any of them.</p>
+      <div class="pipeline">
+        <div class="pipe-cell">
+          <span class="mono">capture</span>
+          <p>Type one line into the Tasks sidebar. That is the whole step — a thought is not a plan yet.</p>
+        </div>
+        <div class="pipe-cell">
+          <span class="mono">generate</span>
+          <p>Claude reads the task, asks you what it needs, and writes a real plan into your library.</p>
+        </div>
+        <div class="pipe-cell">
+          <span class="mono">schedule</span>
+          <p>Pick a time and a repeat. Read the plan first — that is the safety step.</p>
+        </div>
+        <div class="pipe-cell">
+          <span class="mono">run</span>
+          <p>The window fires it, the terminal shows it live, and a transcript is written when it ends.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="manager">
+    <div class="wrap">
+      <h2>One tab, and everything is in it</h2>
+      <p class="lede">Chronos is a single editor tab: your plan library on the left, detail on the right — schedule, working directory, permissions, the plan text itself — and run history along the bottom. Click the dragon in the activity bar to open it, or use the status bar item.</p>
+      <figure class="shot shot-manager">
+        <img src="img/manager.png" alt="The Chronos manager in VS Code. A searchable plan library fills the left column, with New plan and Import buttons above it. The right side shows the selected plan: its file path, the plan text in an editor, and a schedule row with When, Repeat, Permissions, Engine, Model and working directory fields, plus Run now and Schedule buttons. A Runs list spans the bottom, each row showing a plan name, time, an outcome badge and its cost.">
+      </figure>
+      <p class="caption">The working directory and the rolling seven-day cost are blurred in this capture. Everything else is a real window.</p>
+    </div>
+  </section>
+
+  <section id="features">
+    <div class="wrap stack">
+
+      <div class="feature">
+        <div class="feature-text">
+          <h3>The Tasks inbox</h3>
+          <p>The sidebar is a one-line inbox for work that is not a plan yet. Type it, press Enter, and it is captured — no tab switch between having the idea and writing it down.</p>
+          <p>A row's dot says what is happening to it: hollow while it is only captured, amber and pulsing while a planning session is open for it, green while a run started from here is in flight.</p>
+          <p><strong>Generate plan</strong> opens a terminal running <code>claude</code>, already working from your task. It is an interactive session, not a headless one, so it can ask you anything it needs before committing to an approach. Approve the result and a real plan file lands in your library, the task disappears, and the manager opens with the new plan selected. Back out at any point and nothing is created.</p>
+          <p><strong>Explain</strong> is the third button, and it writes nothing at all: it reads the task, looks around the project, and tells you in plain language what the change is, why it is needed, and what the alternatives are — including doing nothing. Reach for it when a task arrived from an agent as one line of somebody else's shorthand.</p>
+        </div>
+        <figure class="shot shot-tasks">
+          <img src="img/tasks.png" alt="The Chronos Tasks sidebar in VS Code: a narrow column of one-line tasks, each with a status dot at its left, and Generate plan and Run buttons in a bar at the foot of the panel.">
+        </figure>
+      </div>
+
+      <div class="feature-text">
+        <h3>The plan library is a folder</h3>
+        <p>A plan is a <code>.md</code> file in one directory, and that directory <em>is</em> the list. There is no index and no database, so editing a plan outside Chronos can never desynchronise anything, and deleting the file takes its schedule with it whether Chronos is open at the time or not.</p>
+        <p>A one-shot that runs successfully leaves the library for <code>.chronos/archive/plans</code> — it has no future once it has completed, though its run card and transcript stay under <strong>Runs</strong>. A plan that failed or was cancelled stays exactly where it is, visible, so you can fix it and run it again. Recurring plans never leave. Nothing in the archive is ever pruned.</p>
+        <p>Adding a plan always <strong>copies the file into the library and schedules the copy</strong>. Your original stays where it is and Chronos never edits or moves it — which also means editing your original afterwards will not change what runs.</p>
+      </div>
+
+      <div class="feature-text">
+        <h3>Everything is per folder</h3>
+        <p>Chronos keeps one set of tasks, plans, schedules and run history per folder, in a <code>.chronos</code> directory inside it. Open a project and you see that project's work and nothing else.</p>
+        <pre><code>your-project/
+  .chronos/
+    plans/          your plan .md files
+    tasks/          the task inbox
+    archive/        plans and tasks that have left the library
+    results/        run transcripts
+    logs/           raw event streams
+    state.json      schedules and run history
+    scheduler.lock</code></pre>
+        <p>The folder is ignored from git on creation — <code>.chronos/.gitignore</code> contains <code>*</code> — so edit that file if you would rather commit your plans. Two windows on two different projects both schedule independently.</p>
+      </div>
+
+      <div class="feature-text">
+        <h3>Scheduling, and what happens while you are away</h3>
+        <p>A plan runs once, daily, or on the weekdays you choose.</p>
+        <ul>
+          <li><strong>Missed windows wait for you.</strong> If the machine was asleep or VS Code was closed when a task was due, Chronos does not run it late. Past the grace window — 15 minutes by default — the occurrence is marked <em>missed</em> and waits for your decision: run it now, reschedule, or skip. A week-long outage collapses into one decision, not seven notifications.</li>
+          <li><strong>Failed runs retry.</strong> One hour later, up to <code>maxRetries</code> attempts. Failures that retrying cannot fix — a deleted plan file, a missing working directory, a cancelled run — are not retried at all.</li>
+          <li><strong>Recurrence survives daylight saving.</strong> It is stored as local wall-clock time, so "daily at 09:00" stays 09:00 across the transition. Concrete instants are derived from the rule, never accumulated.</li>
+          <li><strong>A crash does not cost you a slot.</strong> A run left running because VS Code closed mid-flight is reconciled to failed at next launch and retried, rather than holding its concurrency slot forever.</li>
+        </ul>
+      </div>
+
+      <div class="feature-text">
+        <h3>Every run leaves a transcript</h3>
+        <p>A scheduled job runs while you are away, so the record it leaves is the whole point. One folder per plan, one Markdown file per run, named by local start time and outcome — the folder tells you which nights went wrong before you open anything.</p>
+        <pre><code>.chronos/results/
+  nightly-audit/
+    2026-07-26-213045-completed.md
+    2026-07-27-213012-failed.md</code></pre>
+        <p>Each file records the conditions the run executed under, the agent's narration, every tool call with its target, and a footer with the outcome, turns, cost and duration. The agent's closing message is kept on the run itself and shown in full in the manager's <strong>Runs</strong> section. Transcripts, unlike raw logs, are never deleted automatically.</p>
+      </div>
+
+      <div class="feature-text">
+        <h3>Connect an agent over MCP</h3>
+        <p>Chronos speaks the Model Context Protocol, so any MCP-capable agent — Claude Code, Codex, Cursor, Copilot — can drive the authoring half of the pipeline itself: capture a task, write it up as a plan, and put it on the schedule. The open VS Code window picks the schedule up and runs it that night.</p>
+        <pre><code>claude mcp add chronos -- node "&lt;launcher&gt;" --folder "&lt;project&gt;"</code></pre>
+        <p>There are <span class="mono">15</span> tools — seven that read and eight that write. Run <strong>Chronos: Copy MCP Server Config...</strong> from the command palette, pick your client, and paste what lands on the clipboard; eight clients each get the config shape they actually want.</p>
+        <p>The same server is how a planning session's questions can reach you on another device. Nothing leaves the machine to make that work: a question is a file in <code>.chronos/questions</code> and an answer is the same file written back, so the two ends never need a port, a token or an account between them.</p>
+        <p><strong>An agent cannot set a permission mode.</strong> New tasks get the ordinary <code>auto</code> default, and raising one to <code>bypassPermissions</code> stays a decision you make in the manager, looking at a plan you have read. Asking for it over MCP is refused. There is also <strong>no "run now" tool</strong> — an agent sets a time and the window fires it, which keeps every run on the one path that has the concurrency cap, the watchdogs, the retry logic and the transcript machinery.</p>
+      </div>
+
+    </div>
+  </section>
+
+  <section id="unattended">
+    <div class="wrap">
+      <div class="warning">
+        <h2>Read this before scheduling anything unattended</h2>
+        <p>Chronos runs an AI agent <strong>while you are away from the machine</strong>. Three things follow from that.</p>
+        <ol>
+          <li><strong>Tasks default to <span class="mono">auto</span>.</strong> Chronos runs plans with nobody at the keyboard, so the default leans on the CLI's own judgement about what is safe to do unattended rather than waiving permissions outright. The trade-off is that a mode which can still stop and ask has no one there to answer it at 3am, so a run may end having done only part of the job. <strong>Reviewing the plan before you schedule it is the safety step.</strong> <span class="mono">bypassPermissions</span> (full auto, unrestricted tool access — and one bad plan on a recurring schedule repeats indefinitely), <span class="mono">acceptEdits</span> (auto-approve edits, still gate shell commands) and <span class="mono">plan</span> all remain selectable per task.</li>
+          <li><strong>Runs cost money.</strong> A trivial prompt can cost <span class="mono">~$0.17</span> once context is loaded. A daily series with a broken plan bills every day until you notice. The manager footer shows a rolling <span class="mono">7</span>-day total for exactly this reason.</li>
+          <li><strong>A run can "succeed" while doing less than you asked.</strong> If permission gating blocks tools, the run still exits <span class="mono">0</span>. Chronos surfaces this as a <span class="mono">⚠ N denied</span> badge rather than a silent success, and does not retry it — retrying would hit the same gate.</li>
+        </ol>
+      </div>
+    </div>
+  </section>
+
+  <section id="install">
+    <div class="wrap">
+      <h2>Install</h2>
+      <p class="lede">VS Code <span class="mono">1.93</span> or newer, and the Claude Code CLI on your <span class="mono">PATH</span>.</p>
+      <div class="install-actions">
+        <a class="btn btn-primary" href="https://marketplace.visualstudio.com/items?itemName=Z3n.chronos">Install from the Marketplace</a>
+        <a class="btn btn-outline" href="https://github.com/ZenFrogStudio/Chronus/releases/latest">Download the .vsix</a>
+      </div>
+
+      <h3>Building it yourself</h3>
+      <pre><code>npm install
+npm run watch      # esbuild in watch mode
+npm run typecheck
+npm test           # pure-logic tests, no VS Code host needed
+npm run package    # typecheck + bundle + vsce package</code></pre>
+      <p>Press <kbd class="mono">F5</kbd> to launch an Extension Development Host.</p>
+
+      <h3>One honest limit</h3>
+      <p>Chronos is an extension, not a daemon. <strong>A folder's tasks only run while a VS Code window is open on it.</strong> Tasks due while VS Code was closed are caught up, or marked missed, at next launch. For true machine-level scheduling you would want Windows Task Scheduler invoking <code>claude</code> directly.</p>
+    </div>
+  </section>
+
+</main>
+
+<footer class="site-footer">
+  <div class="wrap footer-inner">
+    <span class="mono">MIT</span>
+    <nav class="footer-links" aria-label="Project links">
+      <a href="https://github.com/ZenFrogStudio/Chronus">Repository</a>
+      <a href="https://github.com/ZenFrogStudio/Chronus/blob/main/CHANGELOG.md">Changelog</a>
+    </nav>
+  </div>
+</footer>
+
+</body>
+</html>

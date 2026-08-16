@@ -1,0 +1,34 @@
+# The Chronos landing page
+
+Plain HTML and CSS. No build step, no dependencies, no JavaScript.
+
+## Preview locally
+
+Open `site/index.html` in a browser. There is nothing to install and nothing to
+build. Every path on the page is relative, so it works the same double-clicked
+as it does deployed.
+
+## Deploy
+
+Cloudflare Pages, connected to this GitHub repo:
+
+| | |
+|---|---|
+| Framework preset | None |
+| Build command | *(empty)* |
+| Build output directory | `site` |
+| Root directory | `/` |
+
+`_headers` is read by Cloudflare Pages and sets a strict Content-Security-Policy.
+The page loads no scripts and nothing off-origin, so if something ever needs an
+inline `<style>` or `<script>`, change the markup rather than the policy.
+
+## The screenshots
+
+`img/manager.png` and `img/tasks.png` are copies of `media/screenshots.png` and
+`media/screenshots-2.png` from the repo root.
+
+**The copy in `img/` is redacted.** The working-directory path and the rolling
+seven-day cost figure are blurred out of `img/manager.png`. The original in
+`media/` is not. Anyone replacing this screenshot with a fresh capture must blur
+both again before it is published.

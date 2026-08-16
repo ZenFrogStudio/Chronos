@@ -2,6 +2,8 @@
 
 Schedule Claude Code tasks from Markdown plan files, inside VS Code.
 
+The landing page lives in [`site/`](site/).
+
 Right-click a `.md` file and choose **Schedule with Chronos**, pick a time, and
 Chronos runs `claude` against it — once, daily, or on chosen weekdays — saving a
 transcript of every run.

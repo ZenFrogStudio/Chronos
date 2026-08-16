@@ -8,6 +8,9 @@
 # line every install ships one developer's private work.
 .chronos/**
 favicon.ico
+# The landing page is repo-only — a static site Cloudflare Pages serves from
+# GitHub. It must never ship inside the .vsix.
+site/**
 docs/**
 test/**
 src/**

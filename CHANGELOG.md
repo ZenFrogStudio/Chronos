@@ -27,6 +27,16 @@ logic out; one of the moves also narrowed a guard.
 
 ### Added
 
+- **A landing page for Chronos, in `site/`.** Until now the only public-facing
+  description of the extension was `README.md`. `site/` is a hand-written static
+  page — plain HTML and one stylesheet, no build step, no dependencies and no
+  JavaScript — with real screenshots of the manager and the Tasks inbox, the
+  four-step pipeline, and the unattended-scheduling warnings carried over from
+  the README rather than softened for a shop window. Cloudflare Pages serves it
+  from this repo with no build command. It ships nothing inside the extension:
+  `site/**` is in `.vscodeignore`, so the page lives in the repo and never
+  reaches the `.vsix`.
+
 - **A schedule made with no VS Code window open now says so.** Chronos only
   fires a task while a window is open on the project; the MCP server writes the
   schedule to disk and exits, and a window picks it up later. That is the design,
