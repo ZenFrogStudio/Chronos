@@ -246,15 +246,24 @@ project's own `.chronos`.
 
 ### Answering a planning session from somewhere else
 
-**Generate plan** normally needs you at the keyboard: the session asks its
-questions in that terminal, and waits there. With `chronos.remoteQuestions` on —
-it is on by default — the questions come out through this MCP server instead, so
-you can answer them from Claude Desktop, or from a phone driving Claude Desktop
-on the same machine.
+**Generate plan** needs you at the keyboard: it always runs in plan mode, so the
+session writes a plan and cannot change anything, and it asks its questions in
+that terminal and waits there.
+
+When you know you are about to walk away, run **Chronos: Generate Plan (Answer
+Remotely)** from the command palette instead. It asks which task, then opens the
+same session with its questions coming out through this MCP server, so you can
+answer them from Claude Desktop, or from a phone driving Claude Desktop on the
+same machine.
+
+It is a separate command rather than a setting because the two cannot share a
+session: plan mode refuses an MCP tool call outright, allowlisted or not, so a
+routed session has to run in `default` mode. That is a real trade, and it should
+be a choice you make on the way out rather than one a default makes for you.
 
 Register the server for the project in whichever client you want to answer from
-(**Chronos: Copy MCP Server Config** gives you the paths). Then press **Generate
-plan** and walk away. Ask the answering agent what Chronos is waiting on:
+(**Chronos: Copy MCP Server Config** gives you the paths). Then run the command
+and walk away. Ask the answering agent what Chronos is waiting on:
 
 - `list_questions` shows each open question, what the session is asking about,
   and which task it came from.
@@ -271,9 +280,7 @@ schedule anything, which matters because nobody is watching it.
 
 Nothing leaves the machine. A question is a file in `.chronos/questions` and an
 answer is the same file written back, so the two ends never need a port, a token
-or an account between them. Unanswered questions are swept after a week. Turn
-`chronos.remoteQuestions` off and **Generate plan** behaves exactly as it always
-has, asking in the terminal and nowhere else.
+or an account between them. Unanswered questions are swept after a week.
 
 ## Read this before scheduling anything unattended
 

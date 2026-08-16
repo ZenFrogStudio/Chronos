@@ -289,15 +289,19 @@ function routedInstruction(sourcePath: string, steps: PlanStepId[]): string {
  * characters, and newlines cannot survive a shell prompt at all. A path is one
  * line and quotes cleanly, and Claude reads the file itself.
  *
- * `--permission-mode plan` for a session you are sitting at: it writes a plan,
- * it does not carry one out, whatever the series is set to run as.
+ * The mode follows the entry point, because the two cannot be had at once. The
+ * Tasks view's **Generate plan** button never passes `askConfigPath`, so it is
+ * always `--permission-mode plan`: a session you are sitting at, which writes a
+ * plan and does not carry one out, whatever the series is set to run as. The
+ * palette's **Generate Plan (Answer Remotely)** passes one, and therefore cannot
+ * plan.
  *
- * A routed session cannot use plan mode, and this is measured rather than
- * assumed — plan mode refuses an MCP tool call outright, allowlisted or not
- * (`Cannot call mcp__chronos-ask__ask_user while in plan mode`), which would
- * leave the session unable to ask its question or deliver its plan. It runs in
- * `default` instead, where the two allowlisted tools go through without a
- * prompt and everything else still stops and asks. Nobody is there to approve
+ * That cost is measured rather than assumed — plan mode refuses an MCP tool call
+ * outright, allowlisted or not (`Cannot call mcp__chronos-ask__ask_user while in
+ * plan mode`), which would leave a routed session unable to ask its question or
+ * deliver its plan. `--allowedTools` does not override it. So a routed session
+ * runs in `default` instead, where the two allowlisted tools go through without
+ * a prompt and everything else still stops and asks. Nobody is there to approve
  * those, so an unattended session cannot make an edit either way — the mode
  * changes what it may call, not what it may change.
  */

@@ -35,13 +35,15 @@ const PREFIX = 'chronos.';
  * Which heading each setting sits under, and the order within it. The one thing
  * here that is not derived from the schema, because "these four belong together"
  * is a judgement `package.json` has nowhere to record.
+ *
+ * Exported so a test can check it the other way round: a key left here after its
+ * setting is deleted from the manifest drops out of `settingGroups` silently.
  */
-const GROUPS: { title: string; keys: string[] }[] = [
+export const GROUPS: { title: string; keys: string[] }[] = [
   {
     title: 'Planning',
     keys: [
       'planModel',
-      'remoteQuestions',
       'planStep.tests',
       'planStep.version',
       'planStep.changelog',

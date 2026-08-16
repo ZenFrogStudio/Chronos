@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { describe, it } from 'node:test';
-import { coerceSetting, SettingField, settingGroups } from '../src/settings';
+import { coerceSetting, GROUPS, SettingField, settingGroups } from '../src/settings';
 
 /**
  * The real schema, read off disk rather than fixtured. The whole point of
@@ -31,6 +31,22 @@ describe('settingGroups', () => {
 
     assert.deepEqual([...shown].sort(), expected);
     assert.equal(new Set(shown).size, shown.length, 'a setting appears on the page twice');
+  });
+
+  it('should_not_list_a_setting_the_manifest_no_longer_declares', () => {
+    // The other direction from the test above, and the quieter failure: a
+    // setting deleted from package.json but left in GROUPS just drops out of the
+    // page, with nothing anywhere complaining.
+    // Arrange.
+    const declared = new Set(Object.keys(PROPERTIES));
+
+    // Act.
+    const listed = GROUPS.flatMap((group) => group.keys);
+
+    // Assert.
+    for (const key of listed) {
+      assert.ok(declared.has(`chronos.${key}`), `GROUPS lists chronos.${key}, which no longer exists`);
+    }
   });
 
   it('should_drop_a_group_with_nothing_in_it', () => {

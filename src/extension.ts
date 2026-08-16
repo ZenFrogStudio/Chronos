@@ -203,6 +203,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     ),
     vscode.commands.registerCommand('chronos.showLogs', () => log.show()),
     vscode.commands.registerCommand('chronos.addTask', () => taskView.addTask()),
+    vscode.commands.registerCommand('chronos.generatePlanRemote', () =>
+      taskView.generatePlanRemotely()
+    ),
     vscode.commands.registerCommand('chronos.copyMcpConfig', () =>
       copyMcpConfig(context, paths().folder)
     )

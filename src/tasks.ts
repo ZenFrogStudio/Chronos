@@ -43,6 +43,17 @@ import { Store } from './store';
  * the library from there. The plan landing in the library is still what marks
  * the task finished.
  *
+ * There are two doors into that session, and the mode follows the one you came
+ * in through. The row's **Generate plan** button is the ordinary one: it always
+ * runs in plan mode, so the session writes a plan and cannot change anything,
+ * and it asks its questions in the terminal in front of you. **Chronos: Generate
+ * Plan (Answer Remotely)** in the command palette routes the questions through
+ * this session's own MCP server so they can be answered from another device, and
+ * that costs plan mode — plan mode refuses an MCP tool call outright, so a routed
+ * session has to run in `default` (see `generateCommand` in `src/launch.ts`). The
+ * two cannot share a session, so choosing the back-channel is a deliberate act
+ * rather than something a default decides for you.
+ *
  * **Run** is the opposite route, for the one-line chore that does not need a plan
  * written for it: the ordinary scheduled path, fired at once, with the task's own
  * text as the prompt and no plan in between. Unattended, in `auto` mode, with a
@@ -270,7 +281,8 @@ export class TaskView implements vscode.WebviewViewProvider, vscode.Disposable {
       case 'generatePlan': {
         const task = this.list().find((t) => t.name === message.name);
         if (task) {
-          await this.generatePlan(task);
+          // The button is the plan-mode door: never routed.
+          await this.generatePlan(task, false);
         }
         // After, not before: this is what lights the row's dot amber.
         this.post();
@@ -307,11 +319,41 @@ export class TaskView implements vscode.WebviewViewProvider, vscode.Disposable {
   ///////////////////////////*Plan generation*////////////////////////////
 
   /**
-   * Opens an interactive plan-mode session that turns a task into a real plan in
-   * the library. Backing out at any point — Esc, closing the terminal, never
-   * approving — leaves the task exactly where it was and creates nothing.
+   * The command-palette route in, and the only way to get a routed session. It
+   * is palette-only on purpose: it trades plan mode away, so it should be
+   * something you go and ask for rather than something a button hands you.
    */
-  private async generatePlan(task: InboxTask): Promise<void> {
+  async generatePlanRemotely(): Promise<void> {
+    const tasks = this.list();
+    if (!tasks.length) {
+      void vscode.window.showInformationMessage('There are no tasks in the inbox to plan.');
+      return;
+    }
+
+    const picked = await vscode.window.showQuickPick(
+      tasks.map((task) => ({ label: firstLine(task.label), task })),
+      { placeHolder: 'Which task should Chronos plan? You will answer its questions remotely.' }
+    );
+    if (!picked) {
+      return;
+    }
+
+    await this.generatePlan(picked.task, true);
+    // After, not before: this is what lights the row's dot amber.
+    this.post();
+  }
+
+  /**
+   * Opens an interactive session that turns a task into a real plan in the
+   * library. Backing out at any point — Esc, closing the terminal, never
+   * approving — leaves the task exactly where it was and creates nothing.
+   *
+   * `routed` is the whole difference between the two entry points: false is the
+   * row's button, which asks in the terminal and therefore runs in plan mode;
+   * true is the palette command, which asks through this session's MCP server
+   * and therefore cannot.
+   */
+  private async generatePlan(task: InboxTask, routed: boolean): Promise<void> {
     if (!fs.existsSync(task.filePath)) {
       void vscode.window.showWarningMessage('That task no longer exists.');
       return;
@@ -339,9 +381,19 @@ export class TaskView implements vscode.WebviewViewProvider, vscode.Disposable {
     fs.mkdirSync(sessionDir, { recursive: true });
 
     // Written before the terminal exists, because the CLI reads it at startup.
-    const askConfigPath = config.get<boolean>('remoteQuestions', true)
+    const askConfigPath = routed
       ? this.writeAskConfig(sessionDir, paths.folder, firstLine(task.label).slice(0, 80))
       : undefined;
+
+    // Said out loud, unlike the old default, which downgraded in silence. You
+    // ran the command because you are about to walk away; finding out later that
+    // the session has been waiting at a terminal prompt is the worst outcome.
+    if (routed && !askConfigPath) {
+      void vscode.window.showWarningMessage(
+        'Chronos could not set up the back-channel for this planning session, so it ' +
+          'will ask its questions in the terminal instead.'
+      );
+    }
 
     const command = generateCommand({
       exe: config.get<string>('claudePath', 'claude'),
@@ -377,7 +429,9 @@ export class TaskView implements vscode.WebviewViewProvider, vscode.Disposable {
     // session. Nothing is running until `sendText` below, so there is no window
     // here in which a plan could land ahead of the entry that would adopt it.
     const terminal = vscode.window.createTerminal({
-      name: `Chronos: plan ${firstLine(task.label).slice(0, 40)}`,
+      // Named apart, because the two sessions behave differently and a tab
+      // strip holding both should say which is which.
+      name: `Chronos: plan ${routed ? '(remote) ' : ''}${firstLine(task.label).slice(0, 40)}`,
       cwd,
       iconPath: new vscode.ThemeIcon('lightbulb')
     });

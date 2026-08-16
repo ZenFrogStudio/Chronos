@@ -105,10 +105,12 @@ logic out; one of the moves also narrowed a guard.
   those, so an unattended session still cannot make an edit. The mode changes
   what it may *call*, not what it may *change*.
 
-  New setting `chronos.remoteQuestions`, on by default. Turn it off and
-  **Generate plan** behaves exactly as it did, asking in the terminal and nowhere
-  else. Unanswered questions are swept after a week, alongside the existing
-  `.pending` sweep.
+  A routed session is its own command — **Chronos: Generate Plan (Answer
+  Remotely)** in the palette — rather than a setting on the **Generate plan**
+  button, for the reason given under *Fixed* below: it costs plan mode, so it has
+  to be something you go and ask for. The button itself is unchanged and still
+  asks in the terminal. Unanswered questions are swept after a week, alongside
+  the existing `.pending` sweep.
 
 - **Chronos as an MCP server, so a coding agent can drive it.** Until now the
   only way to get work into Chronos was to sit in VS Code and do it by hand:
@@ -318,6 +320,33 @@ logic out; one of the moves also narrowed a guard.
   script's existence and its version lookup.
 
 ### Fixed
+
+- **Generate plan opens in plan mode again.** Routing a planning session's
+  questions through the MCP back-channel costs plan mode — the two genuinely
+  cannot share a session, because plan mode refuses an MCP tool call outright
+  even when it is allowlisted (`Cannot call mcp__chronos-ask__ask_user while in
+  plan mode`), and `--allowedTools` does not override it. A routed session has to
+  run in `--permission-mode default` or it cannot ask its question at all.
+
+  That trade was fine; making it the default was not. `chronos.remoteQuestions`
+  shipped on, so the **Generate plan** button stopped being a plan-mode session
+  for everyone, whether or not they were going anywhere — plan mode was not
+  traded away for a feature asked for in the moment, it was traded away
+  permanently by a default.
+
+  The button is back to plan mode, unconditionally: it writes a plan, changes
+  nothing, and asks in its own terminal. The back-channel moves to a
+  command-palette command, **Chronos: Generate Plan (Answer Remotely)**, which
+  picks a task from the inbox and opens the routed session in `default` mode
+  under a terminal named `Chronos: plan (remote) …` so the two are tellable
+  apart. The mode now follows the door you came in through, and choosing the one
+  that costs plan mode is a deliberate act.
+
+  `chronos.remoteQuestions` is gone, because the choice is the command you run.
+  Nothing else about routing changed. A routed session that cannot write its own
+  MCP config now says so rather than silently falling back to asking in the
+  terminal — tolerable for a default, not for a command whose whole purpose is
+  the back-channel.
 
 - **A generated plan could land in the library without ever appearing in it.**
   The end of a planning session hands over to the manager: the plan file is
