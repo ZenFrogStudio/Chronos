@@ -795,7 +795,7 @@ if (PENDING) {
     {
       title: 'Submit the finished plan',
       description:
-        'Delivers the approved plan to Chronos, which files it in this project’s plan library ' +
+        'Delivers the finished plan to Chronos, which files it in this project’s plan library ' +
         'and clears the task it came from. Call this instead of writing the plan to a file ' +
         'yourself. Does not schedule it — a person does that.',
       inputSchema: z.object({

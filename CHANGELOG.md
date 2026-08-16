@@ -413,6 +413,22 @@ logic out; one of the moves also narrowed a guard.
 
 ### Changed
 
+- **A generated plan is submitted without waiting for approval.** A routed
+  planning session — one whose questions come out through `chronos-ask` so they
+  can be answered from a phone — used to send its finished plan back as one last
+  question and sit there until somebody replied yes. It no longer does: it calls
+  `submit_plan` the moment the plan is written. The plan lands in the library,
+  the manager opens with it selected, and the library's editor is where it gets
+  read and changed. Nothing in the library runs until a person schedules it, so
+  the approval reply was a gate standing in front of a gate, and all it bought
+  was a finished session parked on a reply that might not come until morning.
+
+  Clarifying questions are untouched: the session still asks them through
+  `ask_user`, still retries an unanswered one with the same id, and still cannot
+  usefully ask in the terminal. So is the terminal session — it runs in plan
+  mode, where the CLI puts up its own approve-the-plan prompt and there is
+  somebody sitting at it to answer.
+
 - **The plan text box sizes itself to the pane.** It was a fixed 180px textarea
   with a drag grip, sitting in a scrolling column between the plan header and the
   Schedule and Runs sections. Dragging the Plan library or Runs sash resized the

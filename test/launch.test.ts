@@ -383,6 +383,12 @@ describe('generateCommand — questions routed through Chronos', () => {
 
     assert.ok(command.includes(`calling mcp__${ASK_SERVER}__ask_user`));
     assert.ok(command.includes(`call mcp__${ASK_SERVER}__submit_plan`));
+    // Clarifying questions still route; only the final approval went.
+    assert.ok(
+      command.includes(
+        `Ask me anything you need to first, and ask it only by calling mcp__${ASK_SERVER}__ask_user`
+      )
+    );
   });
 
   it('should_say_why_the_terminal_is_no_use', () => {
@@ -392,10 +398,15 @@ describe('generateCommand — questions routed through Chronos', () => {
     assert.ok(routed().includes('I am not at this terminal'));
   });
 
-  it('should_route_the_approval_step_too_rather_than_only_the_questions', () => {
-    // Otherwise the session finishes its plan and parks at "shall I go ahead?"
-    // until the user is back at the desk — the whole thing this avoids.
-    assert.ok(routed().includes('send me a summary of it the same way and wait for my answer'));
+  it('should_not_stop_and_ask_for_the_plan_to_be_approved', () => {
+    // The plan is editable in the panel and cannot run until it is scheduled, so
+    // waiting for a yes only parks a finished session.
+    const command = routed();
+
+    assert.ok(!command.includes('wait for my answer'));
+    assert.ok(!command.includes('When I approve'));
+    assert.ok(!command.includes('approve it first, '));
+    assert.ok(command.includes('Do not ask me to approve it first'));
   });
 
   it('should_tell_the_session_how_to_carry_on_waiting', () => {

@@ -61,8 +61,8 @@ Back out at any point — Escape, closing the terminal, never approving — and
 nothing is created; the task stays exactly where it was.
 
 You do not have to be at that terminal. By default the session's questions come
-out through Chronos's MCP server, so you can answer them — and approve the
-finished plan — from Claude Desktop or from your phone; see
+out through Chronos's MCP server, so you can answer them from Claude Desktop or
+from your phone; see
 [Answering a planning session from somewhere else](#answering-a-planning-session-from-somewhere-else).
 
 Every generated plan ends with a closing step: bump the project version, add a
@@ -270,10 +270,11 @@ and walk away. Ask the answering agent what Chronos is waiting on:
 - `answer_question` records your answers, and the waiting session picks them up
   within a second or two and carries on.
 
-Both prompts travel this way, not just the first: the session sends its finished
-plan back as a question too, so approving it is the same one-line reply. On
-approval it calls `submit_plan`, the plan lands in your library, and the task
-clears — the same ending as if you had sat through it.
+The questions travel this way; the finished plan does not come back as one. As
+soon as the plan is written the session calls `submit_plan`, the plan lands in
+your library and the task clears. You read it — and change it, if it needs it —
+in the manager, which opens with the new plan already selected, before you
+schedule it.
 
 The session gets `ask_user` and `submit_plan` and nothing else. It cannot
 schedule anything, which matters because nobody is watching it.

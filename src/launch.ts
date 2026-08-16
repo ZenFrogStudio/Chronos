@@ -255,9 +255,10 @@ function terminalInstruction(
  * of it will use the terminal, and the question then waits for a keyboard
  * nobody is sitting at.
  *
- * The approval step travels the same way for the same reason. Routing only the
- * questions would leave the session parked at "shall I go ahead?" until the user
- * was back at the desk, which is the whole thing this is meant to avoid.
+ * There is no approval step. The plan is delivered the moment it is written,
+ * because it lands in the library, where it can be read and edited, and nothing
+ * in the library runs until a person schedules it. Waiting for a yes only
+ * stranded a finished session.
  *
  * Same ASCII rule as above: this is one argument typed into a live shell.
  */
@@ -269,12 +270,13 @@ function routedInstruction(sourcePath: string, steps: PlanStepId[]): string {
     'work out how to carry it out, and write an implementation plan for it. ' +
     `Ask me anything you need to first, and ask it only by calling ${ask} - ` +
     'I am not at this terminal and a question asked any other way will not ' +
-    'reach me. When the plan is ready, send me a summary of it the same way and ' +
-    `wait for my answer. When I approve it, call ${submit} with the plan ` +
-    'written as instructions for an agent that will carry it out later with ' +
-    'nobody watching, and change nothing else. Title it with a short summary of ' +
-    'the change the plan makes, in lower case with hyphens instead of spaces. ' +
-    'Do not just repeat the words of the request. If ask_user comes back ' +
+    `reach me. When the plan is ready, call ${submit} with it, written as ` +
+    'instructions for an agent that will carry it out later with nobody ' +
+    'watching, and change nothing else. Do not ask me to approve it first - ' +
+    'I read it and change it in the Chronos panel, and nothing runs until I ' +
+    'schedule it. Title it with a short summary of the change the plan makes, ' +
+    'in lower case with hyphens instead of spaces. Do not just repeat the ' +
+    'words of the request. If ask_user comes back ' +
     'unanswered, call it again with the same id; only if that keeps happening ' +
     'should you ask me here in the terminal instead.' +
     closingSentence(steps)
