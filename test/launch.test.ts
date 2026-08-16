@@ -5,6 +5,7 @@ import {
   ASK_TOOLS,
   buildArgs,
   enabledPlanSteps,
+  explainCommand,
   generateCommand,
   preflightError,
   shellKind,
@@ -517,6 +518,138 @@ describe('generateCommand — questions routed through Chronos', () => {
     assert.ok(!command.includes('--mcp-config'));
     assert.ok(!command.includes('--allowedTools'));
     assert.ok(!command.includes('mcp__'));
+  });
+});
+
+const explainable = (overrides: Partial<Parameters<typeof explainCommand>[0]> = {}) => ({
+  exe: 'claude',
+  sourcePath: TASK,
+  allowDir: LIBRARY,
+  shell: 'posix' as Shell,
+  ...overrides
+});
+
+describe('explainCommand', () => {
+  it('should_name_the_task_file_rather_than_carrying_its_text', () => {
+    const command = explainCommand(explainable());
+
+    assert.ok(command.includes(TASK), 'Claude is told which file to read');
+    assert.ok(!command.includes('\n'), 'a multi-line body would break the command');
+  });
+
+  it('should_ask_for_context_to_be_gathered_before_the_answer', () => {
+    // A task captured by an agent is one line of shorthand. Explaining it from
+    // the line alone is a guess; the project is where the answer is.
+    assert.ok(explainCommand(explainable()).includes('Gather whatever context you need'));
+  });
+
+  it('should_ask_for_plain_language_rather_than_a_summary_of_the_line', () => {
+    const command = explainCommand(explainable());
+
+    assert.ok(command.includes('in plain language a non-specialist would follow'));
+    assert.ok(command.includes('Briefly explain any technical term'));
+  });
+
+  it('should_ask_why_it_is_needed_and_what_the_alternatives_are', () => {
+    // The three questions the button exists to answer: what, why, and what else.
+    const command = explainCommand(explainable());
+
+    assert.ok(command.includes('what the change actually is'));
+    assert.ok(command.includes('why it is needed and what goes wrong if it is never done'));
+    assert.ok(command.includes('what the alternatives are, including doing nothing'));
+  });
+
+  it('should_never_ask_for_a_plan_a_name_or_a_closing_step', () => {
+    // None of the planning machinery is shared. An explanation that ended by
+    // writing a plan file would put a document in the library nobody approved.
+    const command = explainCommand(explainable({ model: 'opus' }));
+
+    assert.ok(!command.includes('save the approved plan'));
+    assert.ok(!command.includes('Finish the plan'));
+    assert.ok(!command.includes('three word'));
+    assert.ok(!command.includes('mcp__'));
+  });
+
+  it('should_tell_the_session_to_change_nothing', () => {
+    const command = explainCommand(explainable());
+
+    assert.ok(command.includes('Do not create, edit or delete any file'));
+    assert.ok(command.includes('do not carry the change out'));
+  });
+
+  it('should_run_in_default_mode_rather_than_plan_mode', () => {
+    // Plan mode ends by offering its work through ExitPlanMode, and approving
+    // that prompt would set the agent off implementing the very task you asked
+    // it to explain. `default` is an ordinary conversation, and every write tool
+    // still stops and asks — with you sitting there.
+    const command = explainCommand(explainable());
+
+    assert.ok(command.includes('--permission-mode default'));
+    assert.ok(!command.includes('--permission-mode plan'));
+    assert.ok(!command.includes('--allow-dangerously-skip-permissions'));
+  });
+
+  it('should_put_the_instruction_where_no_variadic_flag_can_eat_it', () => {
+    // `--add-dir` is variadic, so a trailing instruction is read as one more
+    // directory and the terminal opens with no prompt in it at all.
+    for (const options of [{}, { model: 'opus' }]) {
+      const command = explainCommand(explainable(options));
+      const label = JSON.stringify(options);
+
+      assert.ok(command.includes("'claude' 'Read the file at"), `${label}: instruction is not first`);
+      assert.ok(command.indexOf("'Read the file at") < command.indexOf('--add-dir'), label);
+    }
+  });
+
+  it('should_grant_access_to_the_library_that_holds_the_task', () => {
+    // The working directory is the repo; the task lives in the folder's
+    // `.chronos` root, outside it. Without the grant Claude cannot read it.
+    const command = explainCommand(explainable());
+
+    assert.equal(command.match(/--add-dir/g)?.length, 1);
+    assert.ok(command.includes(`--add-dir '${LIBRARY}'`));
+  });
+
+  it('should_quote_a_path_containing_spaces_for_each_shell', () => {
+    const spaced = 'C:\\My Plans';
+    const quoted: Record<Shell, string> = {
+      powershell: `--add-dir '${spaced}'`,
+      cmd: `--add-dir "${spaced}"`,
+      posix: `--add-dir '${spaced}'`
+    };
+
+    for (const shell of ['powershell', 'cmd', 'posix'] as Shell[]) {
+      const command = explainCommand(explainable({ allowDir: spaced, shell }));
+
+      assert.ok(command.includes(quoted[shell]), `${shell} should wrap the path as ${quoted[shell]}`);
+    }
+  });
+
+  it('should_call_a_quoted_executable_with_the_powershell_call_operator', () => {
+    const exe = 'C:\\Program Files\\claude.exe';
+    const command = explainCommand(explainable({ exe, shell: 'powershell' }));
+
+    assert.ok(command.startsWith(`& '${exe}'`));
+  });
+
+  it('should_omit_the_model_flag_when_no_model_is_pinned', () => {
+    assert.ok(!explainCommand(explainable()).includes('--model'));
+  });
+
+  it('should_pin_the_model_when_one_is_chosen', () => {
+    assert.ok(explainCommand(explainable({ model: 'opus' })).includes('--model opus'));
+  });
+
+  it('should_keep_the_instruction_free_of_shell_metacharacters', () => {
+    // The same rule as every other instruction here: one quoted argument typed
+    // into a live shell prompt. No apostrophe and no em dash either, both of
+    // which are easy to reach for in a sentence about explaining something.
+    const command = explainCommand(explainable({ model: 'opus' }));
+
+    assert.ok(!command.includes('`'), 'a backtick would run a command');
+    assert.ok(!command.includes('$'), 'PowerShell would expand it');
+    assert.ok(!command.includes('!'), 'interactive bash would expand it');
+    assert.ok(!/[^\x20-\x7e]/.test(command), 'the command must be plain ASCII');
   });
 });
 

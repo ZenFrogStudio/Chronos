@@ -40,14 +40,16 @@ document and a thought is not, and because the sidebar is always there — no ta
 switch between having the idea and writing it down.
 
 Type the task in the field at the top and press Enter, or click **Add**. That is
-the whole capture step. Hover a row for the three things you can do to it:
-generate a plan, edit the text in place, or delete it.
+the whole capture step. There are four things you can do to a task: explain it,
+generate a plan from it, edit the text in place, or delete it. Hover a row for
+the first, third and fourth; **Generate plan** and **Run** are the two buttons in
+the bar at the bottom, and they act on the highlighted row.
 
 A row's colour says what is happening to it — plain with a hollow dot while it
 is only captured, amber and pulsing while a planning session is open for it,
 green while a run started from here is in flight.
 
-Press **Generate plan** (the lightbulb on a task row) and Chronos opens a
+Press **Generate plan** (the lightbulb at the bottom) and Chronos opens a
 terminal running `claude`, already working from your task. Claude can ask you
 anything it needs before committing to an approach — that is why the session is
 interactive rather than headless. Approve the plan and it is written into your
@@ -66,6 +68,16 @@ out through Chronos's MCP server, so you can answer them from Claude Desktop or
 from your phone; see
 [Answering a planning session from somewhere else](#answering-a-planning-session-from-somewhere-else).
 
+Press **Explain** (the question mark, first on the row) and Chronos opens a
+terminal that reads the task, looks around the project, and tells you in plain
+language what the change actually is, why it is needed, and what the
+alternatives are — including doing nothing. It writes nothing, changes nothing
+and clears nothing: the task stays exactly where it was, and you can keep
+talking to the session afterwards. This is the one to reach for when a task was
+captured by an agent through Chronos's MCP server and arrives as one line of
+somebody else's shorthand — the other two buttons both commit you to something
+before you know what it means.
+
 Every generated plan ends with a closing step: bump the project version, add a
 matching changelog entry, and commit the result to git. That is what stops an
 unattended overnight run finishing with new behaviour, an untracked working tree
@@ -75,9 +87,10 @@ setting under `chronos.planStep.*`, on the same **Settings** page, and turning
 one off changes only the plans generated afterwards; plans already in your
 library are untouched.
 
-Planning uses whichever model `chronos.planModel` names — set it on the manager's
-**Settings** page, behind the gear beside the plan library. It does not affect
-scheduled runs, which use each plan's own model setting.
+Both sessions you sit at — planning and explaining — use whichever model
+`chronos.planModel` names; set it on the manager's **Settings** page, behind the
+gear beside the plan library. It does not affect scheduled runs, which use each
+plan's own model setting.
 
 A task is a `.md` file in `.chronos/tasks`, so it is just a file like everything
 else here: it can grow past one line, you can edit it in a real editor, and it

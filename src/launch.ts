@@ -347,6 +347,61 @@ export function generateCommand(options: GenerateOptions): string {
   return `${command} ${args.join(' ')}`;
 }
 
+export interface ExplainOptions {
+  exe: string;
+  /** The task file Claude reads the request from. */
+  sourcePath: string;
+  /** Granted with --add-dir, as for a planning session. */
+  allowDir: string;
+  model?: string;
+  shell: Shell;
+}
+
+/**
+ * The command line that opens a read-only session explaining a captured task.
+ *
+ * Same shape as `generateCommand` and none of its machinery: nothing is written,
+ * so there is no staging folder, no naming rule and no closing step. A task that
+ * arrived through the MCP server is one line of somebody else's shorthand, and
+ * this is the only way to find out what it means without committing to planning
+ * or running it.
+ *
+ * Same two rules as every instruction in this file: plain ASCII with no shell
+ * metacharacter, and the instruction ahead of every flag so `--add-dir` cannot
+ * swallow it.
+ */
+export function explainCommand(options: ExplainOptions): string {
+  const { exe, sourcePath, allowDir, model, shell } = options;
+  const q = (value: string) => quote(shell, value);
+
+  const instruction =
+    `Read the file at ${sourcePath}. It is a task captured for this project, ` +
+    'and it may have been written by an AI agent rather than by a person. ' +
+    'Gather whatever context you need from this project first, then explain it ' +
+    'to me here in the terminal: what the change actually is, in plain language ' +
+    'a non-specialist would follow; why it is needed and what goes wrong if it ' +
+    'is never done; and what the alternatives are, including doing nothing, ' +
+    'with your view on which is best. Briefly explain any technical term you ' +
+    'have to use. Do not create, edit or delete any file, do not write a plan, ' +
+    'and do not carry the change out - this is an explanation only. Stay open ' +
+    'afterwards so I can ask follow-up questions.';
+
+  const command = shell === 'powershell' ? `& ${q(exe)}` : q(exe);
+
+  // `default`, deliberately, and not `plan`. A plan-mode session ends by
+  // offering its work through ExitPlanMode, and approving that prompt would set
+  // the agent off *implementing* the very task you asked it to explain. An
+  // ordinary conversation has no such exit, and every write tool still stops and
+  // asks — with you sitting right there, which is the difference from a run
+  // nobody is watching.
+  const args = [q(instruction), '--permission-mode', 'default', '--add-dir', q(allowDir)];
+  if (model) {
+    args.push('--model', model);
+  }
+
+  return `${command} ${args.join(' ')}`;
+}
+
 /**
  * Why this run cannot start, or undefined if it can. Every one of these is a
  * permanent condition — the same missing file would fail identically an hour

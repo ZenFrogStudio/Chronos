@@ -2,7 +2,7 @@
   "name": "chronos",
   "displayName": "Chronos",
   "description": "Schedule Claude Code tasks from Markdown plan files.",
-  "version": "0.8.0-rc.61",
+  "version": "0.8.0-rc.62",
   "publisher": "Z3n",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -160,7 +160,7 @@
             "Sonnet (latest)",
             "Haiku (latest)"
           ],
-          "markdownDescription": "Model used when Chronos generates a plan. Scheduled runs use each plan's own model."
+          "markdownDescription": "Model used for the sessions you sit at — generating a plan, and explaining a task. Scheduled runs use each plan's own model."
         },
         "chronos.planStep.tests": {
           "type": "boolean",

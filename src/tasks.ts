@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { jobState } from './history';
-import { ASK_SERVER, enabledPlanSteps, generateCommand, shellKind } from './launch';
+import { ASK_SERVER, enabledPlanSteps, explainCommand, generateCommand, shellKind } from './launch';
 import * as library from './library';
 import { log } from './log';
 import { createNonce, Manager } from './manager';
@@ -59,6 +59,12 @@ import { Store } from './store';
  * text as the prompt and no plan in between. Unattended, in `auto` mode, with a
  * run record and a transcript like any other job — the task simply stays in the
  * inbox until it finishes, and only a completed run clears it.
+ *
+ * **Explain** is the one route that commits to nothing. Both of the above end
+ * with something in the library or something on the schedule, and a task written
+ * by an agent through the MCP server usually needs reading before either is
+ * worth doing. It opens a terminal that reads the task and talks, writes
+ * nothing, and leaves the row exactly as it found it.
  */
 
 /** A row in the inbox. `name` is the file name, which is its identity. */
@@ -75,6 +81,7 @@ type Inbound =
   | { type: 'editTask'; name: string; text: string }
   | { type: 'deleteTask'; name: string }
   | { type: 'generatePlan'; name: string }
+  | { type: 'explainTask'; name: string }
   | { type: 'runTask'; name: string };
 
 /** A planning session in flight: its staging folder and the task that asked. */
@@ -286,6 +293,16 @@ export class TaskView implements vscode.WebviewViewProvider, vscode.Disposable {
         }
         // After, not before: this is what lights the row's dot amber.
         this.post();
+        return;
+      }
+
+      case 'explainTask': {
+        const task = this.list().find((t) => t.name === message.name);
+        if (task) {
+          await this.explainTask(task);
+        }
+        // No `post()`: nothing about the inbox has changed, and that is the
+        // whole point of this button.
         return;
       }
 
@@ -604,6 +621,56 @@ export class TaskView implements vscode.WebviewViewProvider, vscode.Disposable {
     this.post();
     this.manager.open();
     this.manager.reveal(plan.name);
+  }
+
+  ///////////////////////////*Explaining a task*////////////////////////////
+
+  /**
+   * Opens a session that reads a task and explains it, and does nothing else.
+   *
+   * The third door out of the inbox, and the only one that costs nothing: a task
+   * captured through the MCP server arrives as one line of an agent's shorthand,
+   * and the other two buttons both commit you to something before you have found
+   * out what it means.
+   *
+   * The terminal is the whole output. Nothing is written, so there is no staging
+   * folder, no watcher, no `awaitingPlan` entry and no row state — the task is
+   * exactly where it was when the terminal closes, and `onDidCloseTerminal`
+   * finds nothing to do, which is already its normal path for every other
+   * terminal in the window.
+   */
+  private async explainTask(task: InboxTask): Promise<void> {
+    if (!fs.existsSync(task.filePath)) {
+      void vscode.window.showWarningMessage('That task no longer exists.');
+      return;
+    }
+
+    const config = vscode.workspace.getConfiguration('chronos');
+    const paths = this.paths();
+
+    const command = explainCommand({
+      exe: config.get<string>('claudePath', 'claude'),
+      sourcePath: task.filePath,
+      // The same grant a planning session gets: the task sits under the folder's
+      // `.chronos` root, outside the working directory.
+      allowDir: paths.root,
+      // The same setting, because this is the same kind of session — one you sit
+      // at — rather than a scheduled run.
+      model: config.get<string>('planModel', '') || undefined,
+      shell: shellKind(vscode.env.shell, process.platform)
+    });
+
+    const terminal = vscode.window.createTerminal({
+      name: `Chronos: explain ${firstLine(task.label).slice(0, 40)}`,
+      cwd: paths.folder,
+      iconPath: new vscode.ThemeIcon('question')
+    });
+
+    // Focus, as with a planning session: you pressed a button and are about to
+    // read, then probably to ask something back.
+    terminal.show();
+    terminal.sendText(command);
+    log.info(`opened an explanation session for task ${task.name} in ${paths.folder}`);
   }
 
   ///////////////////////////*Running a task*////////////////////////////

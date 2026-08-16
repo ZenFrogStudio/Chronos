@@ -27,6 +27,33 @@ logic out; one of the moves also narrowed a guard.
 
 ### Added
 
+- **Explain, a read-only third action on a task row.** The inbox is filled from
+  two directions, and one of them is other people's agents: a task captured
+  through the MCP server arrives as one line of somebody else's shorthand, and
+  there was no way to find out what it meant without opening a terminal and
+  asking Claude yourself. Both existing buttons commit you to something before
+  you know — **Generate plan** ends with a document in the library, **Run** fires
+  the task at the scheduler — and neither answers *what is this, and do I even
+  want it?*
+
+  The question mark, first on the row, opens a terminal that reads the task,
+  gathers what it needs from the project, and explains in plain language what the
+  change actually is, why it is needed, and what the alternatives are, including
+  doing nothing. Then it stays open so you can ask follow-up questions.
+
+  It writes nothing at all, which is the whole design: no staging folder, no file
+  watcher, no session to track, and the task is exactly where it was when the
+  terminal closes. It is also the one action with no busy check — reading about a
+  task cannot collide with a plan being written for it or a run already in
+  flight. The session runs in `default` rather than plan mode deliberately: a
+  plan-mode session ends by offering its work through `ExitPlanMode`, and
+  approving that prompt would set the agent off *implementing* the very task you
+  asked it to explain. In `default` every write tool still stops and asks, with
+  you sitting right there.
+
+  It reuses `chronos.planModel` rather than adding a setting of its own, so that
+  setting now covers both of the sessions you sit at.
+
 - **Connecting Chronos to any MCP client, by picking it from a list.** The MCP
   server was already client-neutral; the setup was not. **Chronos: Copy MCP
   Server Config** copied one snippet in Claude's shape, and the README documented

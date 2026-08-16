@@ -102,6 +102,10 @@
       ${dot}
       ${body}
       <span class="task-actions">
+        <button class="task-action" type="button" data-action="explain"
+          title="Explain this task" aria-label="Explain ${esc(firstLine(task.label))}">
+          <i class="codicon codicon-question"></i>
+        </button>
         <button class="task-action" type="button" data-action="edit"
           title="Edit task" aria-label="Edit ${esc(firstLine(task.label))}">
           <i class="codicon codicon-pencil"></i>
@@ -158,6 +162,10 @@
 
     if (button.dataset.action === 'delete') {
       send({ type: 'deleteTask', name });
+    } else if (button.dataset.action === 'explain') {
+      // Read-only, so no busy check: reading about a task cannot collide with a
+      // plan being written for it or a run already in flight.
+      send({ type: 'explainTask', name });
     } else if (button.dataset.action === 'edit') {
       // The edit box is a one-line field and Enter rewrites the file with what
       // is in it, so it is seeded with the first line — as it was before the row
@@ -239,6 +247,13 @@
       case 'R':
         if (task && !task.generating && !task.running) {
           send({ type: 'runTask', name: task.name });
+        }
+        break;
+      // No busy guard, unlike Run: the session only reads.
+      case 'e':
+      case 'E':
+        if (task) {
+          send({ type: 'explainTask', name: task.name });
         }
         break;
       case 'F2':

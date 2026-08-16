@@ -159,8 +159,9 @@ body.vscode-high-contrast-light {
   align-items: flex-start;
   gap: 8px;
   /* The right padding is the action buttons' lane: wrapped text must break
-     before it reaches them rather than run underneath. */
-  padding: 5px 44px 5px 8px;
+     before it reaches them rather than run underneath. Three 17px buttons, two
+     2px gaps, and the 6px the lane sits in from the edge. */
+  padding: 5px 62px 5px 8px;
   border: 1px solid transparent;
   border-radius: var(--radius);
 }
