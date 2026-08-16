@@ -8,6 +8,7 @@ import {
   createPlan,
   duplicatePlan,
   ensureLibrary,
+  firstWords,
   importFile,
   isInside,
   listPlans,
@@ -67,6 +68,30 @@ describe('toPlanFileName', () => {
     const name = toPlanFileName('a'.repeat(500));
 
     assert.ok(name.length <= 63);
+  });
+});
+
+describe('firstWords', () => {
+  it('should_keep_only_the_first_three_words', () => {
+    assert.equal(firstWords('add-monthly-repeat-option-to-scheduler'), 'add-monthly-repeat');
+  });
+
+  it('should_leave_a_name_already_short_enough_alone', () => {
+    assert.equal(firstWords('fix-auth'), 'fix-auth');
+  });
+
+  it('should_treat_spaces_and_punctuation_as_word_breaks', () => {
+    assert.equal(firstWords('Add monthly repeat: option'), 'Add-monthly-repeat');
+  });
+
+  it('should_drop_a_trailing_md_extension_rather_than_counting_it_as_a_word', () => {
+    assert.equal(firstWords('fix-the-auth.md'), 'fix-the-auth');
+  });
+
+  it('should_hand_back_a_title_with_no_words_in_it_unchanged', () => {
+    // Handing '' on instead would rob `toPlanFileName` of its own fallback.
+    assert.equal(firstWords('///'), '///');
+    assert.equal(toPlanFileName(firstWords('///')), 'plan-untitled.md');
   });
 });
 
@@ -455,6 +480,21 @@ describe('importFile', () => {
     assert.equal(plan.name, 'nightly-deploy.md');
     assert.equal(readPlan(dir, plan.name), '# Deploy\n');
     assert.ok(isInside(dir, plan.filePath), 'the copy must land inside the library');
+  });
+
+  it('should_file_the_copy_under_a_given_title_when_one_is_passed', () => {
+    // How a generated plan gets its clamped three-word name without a second
+    // write to disk and without a second door into the library.
+    const plan = importFile(dir, source('something-long.md', '# Long\n'), 'three-word-name');
+
+    assert.equal(plan.name, 'three-word-name.md');
+    assert.equal(readPlan(dir, plan.name), '# Long\n');
+  });
+
+  it('should_still_use_the_source_file_name_when_no_title_is_given', () => {
+    const plan = importFile(dir, source('something-long.md', '# Long\n'));
+
+    assert.equal(plan.name, 'something-long.md');
   });
 
   it('should_leave_the_original_where_it_was', () => {

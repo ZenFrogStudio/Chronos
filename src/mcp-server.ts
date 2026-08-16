@@ -856,7 +856,10 @@ if (PENDING) {
           .string()
           .min(1)
           .max(200)
-          .describe('Short summary of the change the plan makes; the file name comes from it'),
+          .describe(
+            'Three word description of the outcome the plan produces, e.g. "add monthly repeat"; ' +
+              'the file name comes from it'
+          ),
         body: z.string().min(1).max(500_000).describe('The plan itself, as Markdown')
       })
     },

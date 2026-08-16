@@ -183,7 +183,7 @@ describe('generateCommand', () => {
     // text is what filled the library with truncated request lines.
     const command = generateCommand(generatable({ sourcePath: TASK, destDir: STAGING }));
 
-    assert.ok(command.includes('Name that file with a short summary of the change'));
+    assert.ok(command.includes('Name that file with a three word description'));
   });
 
   it('should_not_ask_for_a_name_when_overwriting_in_place', () => {
@@ -430,8 +430,10 @@ describe('generateCommand — questions routed through Chronos', () => {
     // the same one: do not just repeat the request back.
     const command = routed();
 
-    assert.ok(command.includes('Title it with a short summary of the change the plan makes'));
-    assert.ok(command.includes('Do not just repeat the words of the request'));
+    assert.ok(
+      command.includes('Title it with a three word description of the outcome the plan produces')
+    );
+    assert.ok(command.includes('do not just repeat the words of the request'));
   });
 
   it('should_run_in_default_mode_because_plan_mode_refuses_mcp_tools', () => {
@@ -501,9 +503,10 @@ describe('generateCommand — questions routed through Chronos', () => {
         'it. Ask me anything you need to first. When I approve the plan, save the approved ' +
         'plan as a new .md file in D:\\plans\\.pending\\ab12cd, written as instructions for an ' +
         'agent that will carry it out later with nobody watching, and change nothing else. ' +
-        'Name that file with a short summary of the change the plan makes, in lower case with ' +
-        'hyphens instead of spaces, ending in .md, for example add-monthly-repeat-option.md. ' +
-        "Do not just repeat the words of the request.' " +
+        'Name that file with a three word description of the outcome the plan produces, in ' +
+        'lower case with hyphens instead of spaces, ending in .md, for example ' +
+        "add-monthly-repeat.md. Use exactly three words and do not just repeat the words of " +
+        "the request.' " +
         "--permission-mode plan --add-dir 'D:\\plans'"
     );
   });

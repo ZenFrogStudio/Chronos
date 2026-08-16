@@ -51,6 +51,28 @@ export function toPlanFileName(title: string): string {
   return `${safe}${EXTENSION}`;
 }
 
+/** How many words a generated plan name is allowed. */
+const WORD_LIMIT = 3;
+
+/**
+ * The first few words of a title. A generated plan is named by a model, and a
+ * model asked for three words will sometimes write nine — so the library is
+ * kept scannable here rather than trusting the instruction that asked for it.
+ *
+ * Only ever applied to a name Chronos generated. A title the user typed, or one
+ * an external agent chose, is left whole.
+ */
+export function firstWords(title: string, count = WORD_LIMIT): string {
+  const words = title
+    .replace(new RegExp(`\\${EXTENSION}$`, 'i'), '')
+    .split(/[^a-zA-Z0-9]+/)
+    .filter((word) => word !== '');
+
+  // Nothing word-shaped in it — hand the original on, so `toPlanFileName` gets
+  // to apply its own `plan-untitled` fallback rather than being given ''.
+  return words.length ? words.slice(0, count).join('-') : title;
+}
+
 /** Appends -2, -3 … until the name is free. */
 export function uniqueName(existing: readonly string[], desired: string): string {
   const taken = new Set(existing.map((n) => n.toLowerCase()));
@@ -261,11 +283,14 @@ export function writePlan(dir: string, name: string, text: string): void {
  * adds a plan (Import, a drop, right-click → Schedule, the one-time migration of
  * old external schedules) comes through here, which is what makes "every
  * scheduled plan is a library plan" true rather than merely intended.
+ *
+ * `title` overrides the name the copy is filed under; omitted, the source
+ * file's own name is used, which is what an import or a drop wants.
  */
-export function importFile(dir: string, sourcePath: string): PlanFile {
+export function importFile(dir: string, sourcePath: string, title?: string): PlanFile {
   return createPlan(
     dir,
-    path.basename(sourcePath, path.extname(sourcePath)),
+    title ?? path.basename(sourcePath, path.extname(sourcePath)),
     fs.readFileSync(sourcePath, 'utf8')
   );
 }

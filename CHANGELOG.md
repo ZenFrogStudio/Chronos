@@ -351,6 +351,15 @@ logic out; one of the moves also narrowed a guard.
   `npm install`; source guards now hold that name, the editor it targets, the
   script's existence and its version lookup.
 
+- **`/reinstall`, for installing this extension by hand.** The script above is
+  what a scheduled run reaches through **Plan steps → Reinstall**; this is the
+  same thing for a session you are sitting in front of, where the reason to
+  install is usually that you have just found the window running an old build.
+  It runs the checks first and stops if either fails, because installing a broken
+  build is worse than not installing, then packages, installs and says to reload.
+  It lives in `.claude/commands/`, which `.vscodeignore` now keeps out of the
+  packaged extension.
+
 ### Fixed
 
 - **A client config no longer breaks the next time Chronos updates.** VS Code
@@ -458,6 +467,28 @@ logic out; one of the moves also narrowed a guard.
   quoted, and moving one argument does the same job in all three shells.
 
 ### Changed
+
+- **A generated plan now arrives in the library under a three-word name.**
+  Chronos asks the planning session to name the plan after the change it makes,
+  but never said how long that name should be — and its own worked example was
+  four words. So the library filled up with `fix-auth.md` sitting next to
+  `add-monthly-repeat-option-to-the-scheduler-panel.md`, and a column of file
+  names in uneven, sentence-length prose is hard to scan and harder to keep on
+  top of.
+
+  Both instructions now ask for exactly three words describing the outcome the
+  plan produces, with an example that is itself three words. An instruction is a
+  request, though, and a model can drift from it — so Chronos also clamps the
+  name to its first three words as the plan is adopted into the library. The
+  clamp sits at the single door every outside file already comes through, which
+  means one check covers both planning flows: the terminal session that writes
+  the file itself, and the routed session that delivers it through
+  `submit_plan`. The collision suffix still applies afterwards, which matters
+  more now that shorter names collide more often.
+
+  Only a name Chronos generated is shortened. A name typed into the Rename
+  dialog, and a title an external agent passes to the `add_plan` MCP tool, are
+  deliberate choices and are left exactly as they are.
 
 - **A task row now says what is happening to it in its own colour.** The row
   already carried a small state dot — hollow when captured, amber while a plan

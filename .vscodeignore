@@ -1,4 +1,5 @@
 .vscode/**
+.claude/**
 .gitignore
 .sandbox/**
 # Chronos running on its own repository writes a real .chronos here: this

@@ -569,7 +569,18 @@ export class TaskView implements vscode.WebviewViewProvider, vscode.Disposable {
     try {
       // The same door every outside file comes through: it slugs the name Claude
       // chose and de-duplicates it, so a colliding choice cannot overwrite a plan.
-      plan = library.importFile(paths.plans, uri.fsPath);
+      //
+      // The third argument is the name Claude chose, held to three words. Both
+      // planning flows land a file here — the terminal session names it,
+      // `submit_plan` names it — so clamping once at the door covers both, and
+      // covers a model that ignored the instruction. Still through `importFile`,
+      // so the slug, the collision suffix and the extension are the ones the
+      // library always applies.
+      plan = library.importFile(
+        paths.plans,
+        uri.fsPath,
+        library.firstWords(library.titleOf(path.basename(uri.fsPath)))
+      );
     } catch (err) {
       // The plan exists in the staging folder, so leave both it and the task
       // alone rather than clearing a task whose plan never reached the library.

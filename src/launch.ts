@@ -230,9 +230,10 @@ function terminalInstruction(
     : 'overwrite that same file with the approved plan';
 
   const naming =
-    ' Name that file with a short summary of the change the plan makes, in ' +
-    'lower case with hyphens instead of spaces, ending in .md, for example ' +
-    'add-monthly-repeat-option.md. Do not just repeat the words of the request.';
+    ' Name that file with a three word description of the outcome the plan ' +
+    'produces, in lower case with hyphens instead of spaces, ending in .md, ' +
+    'for example add-monthly-repeat.md. Use exactly three words and do not ' +
+    'just repeat the words of the request.';
 
   return (
     `Read the file at ${sourcePath}. Treat what it says as the request, ` +
@@ -274,9 +275,10 @@ function routedInstruction(sourcePath: string, steps: PlanStepId[]): string {
     'instructions for an agent that will carry it out later with nobody ' +
     'watching, and change nothing else. Do not ask me to approve it first - ' +
     'I read it and change it in the Chronos panel, and nothing runs until I ' +
-    'schedule it. Title it with a short summary of the change the plan makes, ' +
-    'in lower case with hyphens instead of spaces. Do not just repeat the ' +
-    'words of the request. If ask_user comes back ' +
+    'schedule it. Title it with a three word ' +
+    'description of the outcome the plan produces, in lower case with hyphens ' +
+    'instead of spaces, for example add-monthly-repeat. Use exactly three words ' +
+    'and do not just repeat the words of the request. If ask_user comes back ' +
     'unanswered, call it again with the same id; only if that keeps happening ' +
     'should you ask me here in the terminal instead.' +
     closingSentence(steps)
