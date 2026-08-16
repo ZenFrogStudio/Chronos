@@ -3,7 +3,14 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { jobState } from './history';
-import { ASK_SERVER, enabledPlanSteps, explainCommand, generateCommand, shellKind } from './launch';
+import {
+  ASK_SERVER,
+  enabledPlanSteps,
+  explainCommand,
+  generateCommand,
+  mcpClientConfig,
+  shellKind
+} from './launch';
 import * as library from './library';
 import { log } from './log';
 import { createNonce, Manager } from './manager';
@@ -481,31 +488,17 @@ export class TaskView implements vscode.WebviewViewProvider, vscode.Disposable {
     try {
       fs.writeFileSync(
         configPath,
-        JSON.stringify(
-          {
-            mcpServers: {
-              [ASK_SERVER]: {
-                // `node` rather than the bundled runtime, matching what
-                // `copyMcpConfig` already tells people to use.
-                command: 'node',
-                args: [
-                  serverPath,
-                  '--folder',
-                  folder,
-                  // Ask and submit only. A session running unattended has no
-                  // way to put anything on the schedule.
-                  '--ask-only',
-                  '--pending',
-                  sessionDir,
-                  '--source',
-                  source
-                ]
-              }
-            }
-          },
-          null,
-          2
-        ),
+        mcpClientConfig(ASK_SERVER, serverPath, [
+          '--folder',
+          folder,
+          // Ask and submit only. A session running unattended has no way to put
+          // anything on the schedule.
+          '--ask-only',
+          '--pending',
+          sessionDir,
+          '--source',
+          source
+        ]),
         'utf8'
       );
       return configPath;

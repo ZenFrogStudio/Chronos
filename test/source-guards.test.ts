@@ -27,6 +27,34 @@ function sourceFiles(dir: string): string[] {
   });
 }
 
+/**
+ * Every file in `src/` the given entry point can reach through its imports.
+ *
+ * A hand-written list is right until somebody adds an import, and then it is
+ * quietly wrong — which is the failure mode the guards below exist to prevent,
+ * so they should not depend on one. Relative specifiers only: a package import
+ * is not ours to check, and `src/` is flat, so `./name` is the whole grammar.
+ */
+function reachableFrom(entry: string): string[] {
+  const seen = new Set<string>();
+  const queue = [entry];
+
+  while (queue.length) {
+    const name = queue.shift()!;
+    if (seen.has(name)) {
+      continue;
+    }
+    seen.add(name);
+
+    const source = fs.readFileSync(path.join(SRC, name), 'utf8');
+    for (const match of source.matchAll(/from '\.\/([\w-]+)'/g)) {
+      queue.push(`${match[1]}.ts`);
+    }
+  }
+
+  return [...seen];
+}
+
 describe('source guards', () => {
   it('should_find_the_source_tree_it_is_meant_to_be_checking', () => {
     // Without this the greps below pass vacuously the day the layout moves.
@@ -282,8 +310,12 @@ describe('source guards', () => {
     // list a client fetches over the wire.
     const server = fs.readFileSync(path.join(SRC, 'mcp-server.ts'), 'utf8');
 
-    const registrations = (server.match(/registerTool\(/g) ?? []).length;
-    const annotated = (server.match(/^\s+annotations: /gm) ?? []).length;
+    // Counted at the `tool()` wrapper rather than at `registerTool`, which the
+    // wrapper now calls once for all fifteen.
+    const registrations = (server.match(/tool\(\s*(fullSurface|server),/g) ?? []).length;
+    // The value, not the field name: `ToolSpec` declares an `annotations` field
+    // too, and counting that would let one registration go without.
+    const annotated = (server.match(/^\s+annotations: (READS|WRITES|\{)/gm) ?? []).length;
 
     assert.ok(registrations > 0, 'src/mcp-server.ts registers no tools at all');
     assert.equal(
@@ -326,16 +358,53 @@ describe('source guards', () => {
     );
   });
 
+  it('should_follow_the_mcp_server_imports_it_is_meant_to_be_checking', () => {
+    // Without this the two guards below pass vacuously the day the import
+    // regex stops matching — the same reasoning as the src tree check above.
+    const reachable = reachableFrom('mcp-server.ts');
+
+    assert.ok(
+      reachable.length > 8,
+      `expected the server's imports, followed only ${reachable.length} files`
+    );
+  });
+
   it('should_never_write_to_stdout_from_the_mcp_server', () => {
     // stdout *is* the JSON-RPC transport. One `console.log` anywhere on this
     // side interleaves with a reply and corrupts the protocol mid-session —
     // the client sees a parse error, not a message it can trace to a log line.
     // stderr is the channel; `note()` is the only way to it.
-    const server = fs.readFileSync(path.join(SRC, 'mcp-server.ts'), 'utf8');
-
-    for (const banned of ['console.log(', 'console.info(', 'process.stdout.write(']) {
-      assert.ok(!server.includes(banned), `src/mcp-server.ts calls ${banned} — use note()`);
+    //
+    // Every module the server pulls in, not just the entry point: most of them
+    // are shared with the extension, where a debug line is harmless and where
+    // nobody adding one is thinking about this process at all.
+    for (const name of reachableFrom('mcp-server.ts')) {
+      const source = fs.readFileSync(path.join(SRC, name), 'utf8');
+      for (const banned of ['console.log(', 'console.info(', 'process.stdout.write(']) {
+        assert.ok(!source.includes(banned), `src/${name} calls ${banned} — use note()`);
+      }
     }
+  });
+
+  it('should_take_the_mcp_server_version_from_the_build_rather_than_a_literal', () => {
+    // A hand-written version is wrong in a way that still compiles and still
+    // runs, so no unit test can catch it: the server simply announces a number
+    // it is not to every client that connects, and the one place anybody looks
+    // to work out which build is running says something untrue.
+    const server = fs.readFileSync(path.join(SRC, 'mcp-server.ts'), 'utf8');
+    const build = fs.readFileSync(path.join(ROOT, 'esbuild.js'), 'utf8');
+
+    assert.ok(
+      server.includes('process.env.CHRONOS_VERSION'),
+      'src/mcp-server.ts must take its version from the build'
+    );
+    assert.doesNotMatch(server, /const VERSION = '\d/, 'src/mcp-server.ts hardcodes a version');
+    // Both halves: the reader is useless without the stamp, and the stamp is
+    // useless without the reader.
+    assert.ok(
+      build.includes('process.env.CHRONOS_VERSION'),
+      'esbuild.js no longer defines CHRONOS_VERSION, so the server falls back to 0.0.0-dev'
+    );
   });
 
   it('should_keep_the_mcp_server_free_of_vscode', () => {
@@ -345,12 +414,11 @@ describe('source guards', () => {
     // connection attempt. esbuild catches the direct case, this catches the
     // transitive one before the build does.
     //
-    // `mcp-clients.ts` is on the list for the sibling reason: nothing spawns it,
-    // but the plain Node test runner loads it, and an import of `vscode` there
-    // takes its whole test file down rather than failing one assertion.
-    const reachable = ['mcp-server.ts', 'mcp-tools.ts', 'series.ts', 'library.ts', 'roots.ts',
-      'state-file.ts', 'edit.ts', 'recurrence.ts', 'types.ts', 'time.ts', 'agents.ts', 'migrate.ts',
-      'questions.ts', 'mcp-clients.ts'];
+    // `mcp-clients.ts` is added for the sibling reason: nothing spawns it, and
+    // the server does not import it, but the plain Node test runner loads it,
+    // and an import of `vscode` there takes its whole test file down rather
+    // than failing one assertion.
+    const reachable = [...new Set([...reachableFrom('mcp-server.ts'), 'mcp-clients.ts'])];
 
     for (const name of reachable) {
       const source = fs.readFileSync(path.join(SRC, name), 'utf8');
@@ -380,7 +448,7 @@ describe('source guards', () => {
     for (const tool of tools) {
       assert.match(
         server,
-        new RegExp(`registerTool\\(\\s*'${tool}'`),
+        new RegExp(`tool\\(\\s*server,\\s*'${tool}'`),
         `src/mcp-server.ts never registers ${tool}, so the allowlist points at nothing`
       );
     }
@@ -394,9 +462,17 @@ describe('source guards', () => {
     const tasks = fs.readFileSync(path.join(SRC, 'tasks.ts'), 'utf8');
 
     assert.match(launch, /export const ASK_SERVER = 'chronos-ask'/);
-    assert.ok(
-      tasks.includes('[ASK_SERVER]:'),
+    assert.match(
+      tasks,
+      /mcpClientConfig\(\s*ASK_SERVER/,
       'src/tasks.ts must key its mcp.json off ASK_SERVER rather than a literal'
+    );
+    // The key itself is built inside `mcpClientConfig` now, so this is the other
+    // half of the same rule: the builder must use the name it was handed.
+    assert.match(
+      launch,
+      /mcpServers: \{ \[name\]:/,
+      'src/launch.ts must build the server key from its name argument'
     );
   });
 

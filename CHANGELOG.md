@@ -27,6 +27,21 @@ logic out; one of the moves also narrowed a guard.
 
 ### Added
 
+- **A schedule made with no VS Code window open now says so.** Chronos only
+  fires a task while a window is open on the project; the MCP server writes the
+  schedule to disk and exits, and a window picks it up later. That is the design,
+  but `schedule_plan` replied with the same plain success either way, so an agent
+  told you "booked for tonight" when the truthful answer was "booked for whenever
+  you next open this project" — and nothing ran overnight, with nothing anywhere
+  to say why.
+
+  It now reads the scheduler's own lock file, which an open window heartbeats
+  every tick, and adds a second `queued` field to the reply when nobody is
+  renewing it. A separate field rather than a reworded success, so an agent can
+  tell "this is what it will run as" from "this is when, if ever". The same field
+  appears on `update_schedule`, but only when the call actually moved the timing —
+  pausing or renaming a task says nothing about when it will next run.
+
 - **Explain, a read-only third action on a task row.** The inbox is filled from
   two directions, and one of them is other people's agents: a task captured
   through the MCP server arrives as one line of somebody else's shorthand, and
@@ -388,6 +403,50 @@ logic out; one of the moves also narrowed a guard.
   packaged extension.
 
 ### Fixed
+
+- **A failed MCP tool call now leaves a record.** Every handler in the server did
+  real work on the filesystem — a full disk, a file removed between the check and
+  the read, a permissions change — and a throw became a failure at the client and
+  nothing at all on this side. A server failing every call left no trace anywhere
+  the user could look, and the raw error travelled to the client carrying more of
+  the machine's paths than it needed to. All fifteen tools are now registered
+  through one wrapper that turns a throw into a line on stderr and a refusal the
+  agent can read and repeat back.
+
+- **The server no longer dies without saying why.** A process that exits silently
+  looks identical to one the client never managed to start. An uncaught error now
+  writes its reason to stderr and exits, so the client can respawn it; a stray
+  rejected promise is logged rather than taking the process with it.
+
+- **A `--folder` that does not exist is refused at start-up.** Chronos creates its
+  `.chronos` tree with a recursive mkdir, so a folder misspelled in somebody's
+  client config did not fail — the first write built the whole missing chain and
+  left a Chronos tree inside a path that had never existed, while the server went
+  on serving a project that was not there. The folder is now checked once, at
+  start-up, where the mistake actually is. A folder that exists without a
+  `.chronos` in it is normal and still works exactly as before.
+
+- **The version the server announces is the real one.** It was a literal reading
+  `0.8.0` while the package was sixty release candidates past that, and it is the
+  first thing anyone reads when working out which build a client is talking to.
+  It is now stamped into the bundle from `package.json` at build time, so it
+  cannot be forgotten.
+
+- **The stdout and `vscode` guards now follow the server's imports.** stdout is
+  the JSON-RPC transport, so one `console.log` corrupts the conversation
+  mid-message — but the guard against it read only `mcp-server.ts`, while the
+  server pulls in a dozen modules shared with the extension, where a debug line
+  looks harmless. Its neighbour checked a hand-written list of thirteen file
+  names, correct on the day it was written and quietly incomplete from the first
+  import added afterwards. Both now crawl the imports themselves, and a third
+  test checks the crawl is still finding them, so neither can pass by finding
+  nothing.
+
+- **The MCP client config is built in one place.** The JSON that tells a client
+  how to spawn Chronos was assembled twice — once for the config you paste into
+  your own client, once for the private back-channel a planning session is
+  spawned with. Same key, same command, different arguments, and nothing keeping
+  them in step. One builder now produces both.
 
 - **A client config no longer breaks the next time Chronos updates.** VS Code
   installs an extension into a folder named after its version, so the path the

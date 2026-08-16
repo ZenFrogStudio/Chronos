@@ -7,6 +7,7 @@ import {
   enabledPlanSteps,
   explainCommand,
   generateCommand,
+  mcpClientConfig,
   preflightError,
   shellKind,
   Shell
@@ -725,6 +726,62 @@ describe('shellKind', () => {
   it('should_fall_back_to_powershell_for_an_unknown_windows_shell', () => {
     // VS Code's own default profile on Windows.
     assert.equal(shellKind('C:\\tools\\nushell\\nu.exe', 'win32'), 'powershell');
+  });
+});
+
+describe('mcp client config', () => {
+  // The awkward paths on purpose, as in `mcp-clients.test.ts`: a config that
+  // parses cleanly and points at nothing fails silently at both ends.
+  const SERVER_JS = 'C:\\Users\\One Media Labs\\globalStorage\\z3n.chronos\\mcp-server.js';
+  const FOLDER = 'D:\\03-Software\\My Project';
+
+  const parse = (json: string) => JSON.parse(json) as {
+    mcpServers: Record<string, { command: string; args: string[] }>;
+  };
+
+  it('should_name_the_plain_server_chronos_and_run_it_with_node', () => {
+    const config = parse(mcpClientConfig('chronos', SERVER_JS, ['--folder', FOLDER]));
+
+    assert.deepEqual(Object.keys(config.mcpServers), ['chronos']);
+    assert.equal(config.mcpServers.chronos.command, 'node');
+    assert.deepEqual(config.mcpServers.chronos.args, [SERVER_JS, '--folder', FOLDER]);
+  });
+
+  it('should_key_the_ask_config_off_the_name_it_is_given', () => {
+    // The name the tools are registered under has to be the name the
+    // `--allowedTools` allowlist uses, so the key can never be a literal.
+    const config = parse(
+      mcpClientConfig(ASK_SERVER, SERVER_JS, [
+        '--folder',
+        FOLDER,
+        '--ask-only',
+        '--pending',
+        'D:\\session',
+        '--source',
+        'tidy the inbox'
+      ])
+    );
+
+    assert.deepEqual(Object.keys(config.mcpServers), [ASK_SERVER]);
+    assert.deepEqual(config.mcpServers[ASK_SERVER].args, [
+      SERVER_JS,
+      '--folder',
+      FOLDER,
+      '--ask-only',
+      '--pending',
+      'D:\\session',
+      '--source',
+      'tidy the inbox'
+    ]);
+  });
+
+  it('should_produce_json_a_client_can_actually_parse', () => {
+    // These are Windows paths full of backslashes; built by hand, one unescaped
+    // separator makes a file that parses and points nowhere.
+    const json = mcpClientConfig('chronos', SERVER_JS, ['--folder', FOLDER]);
+
+    assert.doesNotThrow(() => JSON.parse(json));
+    assert.ok(json.includes('\\\\'), 'the path separators are not JSON-escaped');
   });
 });
 

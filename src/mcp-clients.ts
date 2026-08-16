@@ -21,6 +21,8 @@
  * No `vscode` import, so the tests can load it in the plain Node runner.
  */
 
+import { mcpClientConfig } from './launch';
+
 export interface McpClient {
   id: string;
   label: string;
@@ -41,24 +43,20 @@ export const SERVER_NAME = 'chronos';
 
 /**
  * The stdio entry five of the eight clients share, give or take a timeout key.
- * Written once here rather than five times in the table below: the shape is the
+ * Named once here rather than five times in the table below: the shape is the
  * same fact repeated, and a fix applied to four of five copies is worse than no
  * fix at all.
+ *
+ * The shape itself comes from `mcpClientConfig`, which a planning session's own
+ * `mcp.json` is built with too — same key, same command, different arguments,
+ * and no way for the two to drift.
  */
 function mcpServersJson(
   serverPath: string,
   folder: string,
   extra: Record<string, unknown> = {}
 ): string {
-  return JSON.stringify(
-    {
-      mcpServers: {
-        [SERVER_NAME]: { command: 'node', args: [serverPath, '--folder', folder], ...extra }
-      }
-    },
-    null,
-    2
-  );
+  return mcpClientConfig(SERVER_NAME, serverPath, ['--folder', folder], extra);
 }
 
 /**

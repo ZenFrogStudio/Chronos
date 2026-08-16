@@ -1,16 +1,19 @@
-import { McpServer } from '@modelcontextprotocol/server';
+import { McpServer, StandardSchemaWithJSON } from '@modelcontextprotocol/server';
 import { serveStdio } from '@modelcontextprotocol/server/stdio';
 import * as fs from 'fs';
 import * as path from 'path';
 import { z } from 'zod';
 import * as library from './library';
+import { readLock } from './lock';
 import {
   planAnswers,
   planQuestion,
   planSeriesOverrides,
   planSeriesUpdate,
   planTiming,
-  ScheduleWhen
+  QUEUED_NOTE,
+  ScheduleWhen,
+  schedulerIsLive
 } from './mcp-tools';
 import {
   listQuestions,
@@ -68,7 +71,13 @@ import { ChronosState, TaskRun, TaskSeries } from './types';
 
 ///////////////////////////*Process setup*////////////////////////////
 
-const VERSION = '0.8.0';
+/**
+ * Stamped in by `esbuild.js` from `package.json`, because a version written here
+ * by hand is one nobody remembers to change — and this is what the server
+ * announces to every client that connects. The fallback is what the test build
+ * sees, which does not run esbuild.
+ */
+const VERSION = process.env.CHRONOS_VERSION ?? '0.0.0-dev';
 
 /**
  * Retries for a series an agent schedules. The manifest default for
@@ -101,6 +110,26 @@ const ARGV = process.argv.slice(2);
  * project, and an agent is already working in one.
  */
 const FOLDER = path.resolve(argValue(ARGV, '--folder') ?? process.cwd());
+
+/**
+ * A folder that does not exist is a typo in a client config, not an instruction
+ * to create one. Checked here rather than at the first write, because by then
+ * `ensureRoot` has already built the chain and there is nothing left to refuse.
+ */
+function requireFolder(folder: string): void {
+  let found = false;
+  try {
+    found = fs.statSync(folder).isDirectory();
+  } catch {
+    found = false;
+  }
+  if (!found) {
+    note(`--folder is not a folder that exists: ${folder}`);
+    process.exit(1);
+  }
+}
+
+requireFolder(FOLDER);
 
 /**
  * Narrows the surface to what a planning session needs: `ask_user` to reach the
@@ -164,6 +193,53 @@ const refuse = (reason: string) => ({
   isError: true
 });
 
+/** What every handler returns: an answer, or a refusal the agent can read. */
+type Reply = ReturnType<typeof reply> | ReturnType<typeof refuse>;
+
+/**
+ * How a tool is declared. `annotations` is typed as plain booleans rather than
+ * against the SDK's own type so `READS` and `WRITES` pass through untouched —
+ * the shape is forwarded, never read here.
+ */
+interface ToolSpec<Schema extends StandardSchemaWithJSON> {
+  title: string;
+  annotations: Readonly<Record<string, boolean>>;
+  description: string;
+  inputSchema: Schema;
+}
+
+/**
+ * Registers a tool whose handler cannot fail without saying so.
+ *
+ * A throw becomes a refusal the agent can read and a line on stderr the user can
+ * find, rather than an error that exists only at the far end. `target` is
+ * undefined when `--ask-only` withheld the tool, which keeps each registration a
+ * single expression instead of an `if` around the lot.
+ */
+function tool<Schema extends StandardSchemaWithJSON>(
+  target: McpServer | undefined,
+  name: string,
+  spec: ToolSpec<Schema>,
+  handler: (args: StandardSchemaWithJSON.InferOutput<Schema>) => Promise<Reply>
+): void {
+  const guarded = async (args: StandardSchemaWithJSON.InferOutput<Schema>): Promise<Reply> => {
+    try {
+      return await handler(args);
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      note(`${name} failed: ${reason}`);
+      return refuse(`${name} could not complete: ${reason}`);
+    }
+  };
+
+  // The SDK works out a handler's argument type from the schema through a
+  // conditional type, which TypeScript cannot evaluate while `Schema` is still
+  // a type parameter — the same call typechecks with a concrete schema. The
+  // cast is on this one hand-off; `guarded` above is fully typed, and each of
+  // the fifteen call sites still gets its arguments from its own `inputSchema`.
+  target?.registerTool(name, spec, guarded as never);
+}
+
 /**
  * Resolves a plan name, or explains why it will not. Wrapping `planPath`'s throw
  * turns a traversal attempt into an ordinary refused tool call — the agent gets
@@ -200,6 +276,11 @@ function describeSeries(series: TaskSeries) {
     cwd: series.cwd,
     maxRetries: series.maxRetries
   };
+}
+
+/** `QUEUED_NOTE` when nothing is watching this folder, otherwise undefined. */
+function queuedNote(): string | undefined {
+  return schedulerIsLive(readLock(paths().lock)) ? undefined : QUEUED_NOTE;
 }
 
 function describeRun(run: TaskRun) {
@@ -261,7 +342,7 @@ const WRITES = {
 
 // ---------- read ----------
 
-fullSurface?.registerTool(
+tool(fullSurface,
   'list_plans',
   {
     title: 'List plans',
@@ -282,7 +363,7 @@ fullSurface?.registerTool(
     )
 );
 
-fullSurface?.registerTool(
+tool(fullSurface,
   'read_plan',
   {
     title: 'Read a plan',
@@ -300,7 +381,7 @@ fullSurface?.registerTool(
   }
 );
 
-fullSurface?.registerTool(
+tool(fullSurface,
   'list_tasks',
   {
     title: 'List captured tasks',
@@ -322,7 +403,7 @@ fullSurface?.registerTool(
   }
 );
 
-fullSurface?.registerTool(
+tool(fullSurface,
   'list_schedule',
   {
     title: 'List the schedule',
@@ -335,7 +416,7 @@ fullSurface?.registerTool(
   async () => replyJson(state().series.map(describeSeries))
 );
 
-fullSurface?.registerTool(
+tool(fullSurface,
   'list_runs',
   {
     title: 'List runs',
@@ -357,7 +438,7 @@ fullSurface?.registerTool(
   }
 );
 
-fullSurface?.registerTool(
+tool(fullSurface,
   'read_transcript',
   {
     title: 'Read a run transcript',
@@ -385,7 +466,7 @@ fullSurface?.registerTool(
 
 // ---------- write ----------
 
-fullSurface?.registerTool(
+tool(fullSurface,
   'add_task',
   {
     title: 'Capture a task',
@@ -406,7 +487,7 @@ fullSurface?.registerTool(
   }
 );
 
-fullSurface?.registerTool(
+tool(fullSurface,
   'add_plan',
   {
     title: 'Write a plan',
@@ -427,7 +508,7 @@ fullSurface?.registerTool(
   }
 );
 
-fullSurface?.registerTool(
+tool(fullSurface,
   'schedule_plan',
   {
     title: 'Schedule a plan',
@@ -502,15 +583,19 @@ fullSurface?.registerTool(
     });
 
     note(`scheduled ${series.fileName} for ${series.nextRunAt}`);
+    // A second field rather than one merged sentence, so an agent reading the
+    // JSON can tell "this is what it will run as" from "this is when, if ever".
+    const queued = queuedNote();
     return replyJson({
       scheduled: series.fileName,
       ...describeSeries(series),
-      note: 'It runs in `auto` permission mode. Raise that in the Chronos manager if it needs more.'
+      note: 'It runs in `auto` permission mode. Raise that in the Chronos manager if it needs more.',
+      ...(queued ? { queued } : {})
     });
   }
 );
 
-fullSurface?.registerTool(
+tool(fullSurface,
   'update_schedule',
   {
     title: 'Change a schedule',
@@ -555,8 +640,11 @@ fullSurface?.registerTool(
     ]);
 
     // Timing is only recomputed when the caller said something about it —
-    // otherwise pausing a task would silently move when it next runs.
-    if (args.at !== undefined || args.repeat !== undefined || args.timeLocal !== undefined) {
+    // otherwise pausing a task would silently move when it next runs. The same
+    // test decides whether the reply mentions the queue: pausing or renaming a
+    // series says nothing about when it will run, so it carries no note.
+    const retimed = args.at !== undefined || args.repeat !== undefined || args.timeLocal !== undefined;
+    if (retimed) {
       const timing = planTiming(args as ScheduleWhen);
       if (!timing.ok) {
         return refuse(timing.reason);
@@ -588,11 +676,12 @@ fullSurface?.registerTool(
       return refuse('That task was removed while this call was in flight.');
     }
     note(`updated series ${updated.id}`);
-    return replyJson(describeSeries(updated));
+    const queued = retimed ? queuedNote() : undefined;
+    return replyJson({ ...describeSeries(updated), ...(queued ? { queued } : {}) });
   }
 );
 
-fullSurface?.registerTool(
+tool(fullSurface,
   'unschedule',
   {
     title: 'Unschedule a task',
@@ -671,7 +760,7 @@ async function waitForAnswers(
   }
 }
 
-server.registerTool(
+tool(server,
   'ask_user',
   {
     title: 'Ask the user a question',
@@ -759,7 +848,7 @@ server.registerTool(
   }
 );
 
-fullSurface?.registerTool(
+tool(fullSurface,
   'list_questions',
   {
     title: 'List questions waiting for an answer',
@@ -790,7 +879,7 @@ fullSurface?.registerTool(
     )
 );
 
-fullSurface?.registerTool(
+tool(fullSurface,
   'answer_question',
   {
     title: 'Answer a question',
@@ -842,7 +931,7 @@ fullSurface?.registerTool(
 if (PENDING) {
   const destination = PENDING;
 
-  server.registerTool(
+  tool(server,
     'submit_plan',
     {
       title: 'Submit the finished plan',
@@ -903,6 +992,20 @@ function safeRead(filePath: string): string {
 ///////////////////////////*Serve*////////////////////////////
 
 note(`serving ${FOLDER}`);
+
+/**
+ * A process that dies without a word looks identical to one the client never
+ * started. Exit rather than limp on: the client can respawn a dead server, and
+ * cannot do anything with one that has stopped answering.
+ */
+process.on('uncaughtException', (err) => {
+  note(`fatal: ${err.message}`);
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (cause) => {
+  note(`unhandled rejection: ${cause instanceof Error ? cause.message : String(cause)}`);
+});
 
 serveStdio(() => server, {
   onerror: (err) => note(`transport error: ${err.message}`)

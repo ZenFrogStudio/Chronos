@@ -1,4 +1,5 @@
 const esbuild = require('esbuild');
+const { version } = require('./package.json');
 
 const watch = process.argv.includes('--watch');
 const production = process.argv.includes('--production');
@@ -42,6 +43,10 @@ const shared = {
   sourcemap: !production,
   minify: production,
   logLevel: 'silent',
+  // Stamped into both bundles, so the version the MCP server announces to a
+  // client is the one in package.json rather than a literal nobody remembers
+  // to change.
+  define: { 'process.env.CHRONOS_VERSION': JSON.stringify(version) },
   plugins: [problemMatcherLog]
 };
 

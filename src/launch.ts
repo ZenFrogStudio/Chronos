@@ -157,6 +157,33 @@ export function enabledPlanSteps(
 export const ASK_SERVER = 'chronos-ask';
 export const ASK_TOOLS = ['ask_user', 'submit_plan'].map((tool) => `mcp__${ASK_SERVER}__${tool}`);
 
+/**
+ * The JSON an MCP client needs in order to spawn the Chronos server.
+ *
+ * One builder for both callers — the clipboard snippet a user pastes into their
+ * own client (`mcp-clients.ts`), and the `mcp.json` a planning session is
+ * spawned with (`tasks.ts`) — so the key, the shape and the command cannot
+ * drift apart between them. Only the arguments differ, which is the only thing
+ * that should. `extra` is for the one or two clients that want a timeout key
+ * alongside the command; everything else about the entry is identical.
+ *
+ * `node` rather than the runtime the editor happens to be using: it is what
+ * every client's own documentation assumes, and what the README already tells
+ * people to type.
+ */
+export function mcpClientConfig(
+  name: string,
+  serverPath: string,
+  args: readonly string[],
+  extra: Record<string, unknown> = {}
+): string {
+  return JSON.stringify(
+    { mcpServers: { [name]: { command: 'node', args: [serverPath, ...args], ...extra } } },
+    null,
+    2
+  );
+}
+
 export interface GenerateOptions {
   exe: string;
   /** The file Claude reads the request from — a library plan, or a sidebar task. */

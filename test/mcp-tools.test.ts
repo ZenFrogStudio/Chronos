@@ -8,11 +8,12 @@ import {
   planSeriesUpdate,
   planTiming,
   ScheduleWhen,
+  schedulerIsLive,
   Timing,
   Verdict
 } from '../src/mcp-tools';
 import { QuestionFile } from '../src/questions';
-import { TaskSeries } from '../src/types';
+import { LOCK_STALE_MS, TaskSeries } from '../src/types';
 
 /**
  * The MCP boundary as assertions, in the style of `command.test.ts`.
@@ -86,6 +87,42 @@ describe('mcp permission mode', () => {
     );
 
     assert.equal(reasonOf(verdict), PERMISSION_REFUSAL);
+  });
+});
+
+describe('mcp scheduler liveness', () => {
+  // An explicit `now` throughout: the whole point is the gap between two
+  // numbers, and reading one of them off the wall clock makes the boundary
+  // cases below depend on how long the test run took to get here.
+  const NOW_MS = NOW.getTime();
+
+  it('should_treat_a_heartbeat_from_a_second_ago_as_live', () => {
+    const live = schedulerIsLive({ heartbeatAt: NOW_MS - 1000 }, NOW_MS);
+
+    assert.equal(live, true);
+  });
+
+  it('should_treat_no_lock_at_all_as_nothing_watching', () => {
+    // The ordinary case: the folder has never been opened in VS Code, so an
+    // agent's schedule sits on disk until somebody opens it.
+    const live = schedulerIsLive(undefined, NOW_MS);
+
+    assert.equal(live, false);
+  });
+
+  it('should_treat_a_heartbeat_older_than_the_stale_window_as_nothing_watching', () => {
+    // A window that closed without releasing the lock leaves the file behind.
+    const live = schedulerIsLive({ heartbeatAt: NOW_MS - LOCK_STALE_MS - 1 }, NOW_MS);
+
+    assert.equal(live, false);
+  });
+
+  it('should_treat_a_heartbeat_exactly_at_the_stale_window_as_live', () => {
+    // The same boundary `holdLock` uses, so the two never disagree about who is
+    // holding the lock at the instant it lapses.
+    const live = schedulerIsLive({ heartbeatAt: NOW_MS - LOCK_STALE_MS }, NOW_MS);
+
+    assert.equal(live, true);
   });
 });
 

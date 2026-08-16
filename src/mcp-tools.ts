@@ -1,7 +1,7 @@
 import { seriesEdit } from './edit';
 import type { Answer, AskedQuestion, QuestionFile } from './questions';
 import { computeNextRun } from './recurrence';
-import { DAILY, Recurrence, TaskSeries } from './types';
+import { DAILY, LOCK_STALE_MS, Recurrence, TaskSeries } from './types';
 
 /**
  * What an MCP client is allowed to ask Chronos to do.
@@ -228,6 +228,33 @@ export function planSeriesOverrides(raw: unknown): Verdict<Partial<TaskSeries>> 
   }
   return { ok: true, value: patch };
 }
+
+///////////////////////////*Is anything there to run it*////////////////////////////
+
+/**
+ * Whether a VS Code window is currently scheduling this folder.
+ *
+ * A missing lock and a lock nobody has renewed mean the same thing: the writes
+ * an agent makes will sit on disk until a window opens. Taking the holder as an
+ * argument rather than a path keeps the rule testable and leaves the file read
+ * in `mcp-server.ts`, the same split the rest of this module uses.
+ */
+export function schedulerIsLive(
+  held: { heartbeatAt: number } | undefined,
+  now: number = Date.now(),
+  staleMs: number = LOCK_STALE_MS
+): boolean {
+  return Boolean(held) && now - held!.heartbeatAt <= staleMs;
+}
+
+/**
+ * What an agent is told when it schedules something with no window watching.
+ * Worded as a fact about what happens next rather than as a warning: the
+ * schedule really was saved, and the agent needs to pass that on accurately.
+ */
+export const QUEUED_NOTE =
+  'No VS Code window is open on this project at the moment, so nothing will ' +
+  'run until one is. The schedule is saved and will fire when a window opens.';
 
 ///////////////////////////*Asking and answering*////////////////////////////
 
