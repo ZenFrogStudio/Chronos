@@ -888,6 +888,13 @@ logic out; one of the moves also narrowed a guard.
   the row button did, and the host still checks the task exists before opening
   anything.
 
+- **A task row in the sidebar shows a hand cursor when you point at it.** The
+  whole row has always been the click target that selects a task, but the
+  pointer stayed an arrow, so the row read as a label rather than something you
+  could press. Every other clickable surface in the extension — the plan library
+  rows, the run names, the buttons, the calendar days — already showed the hand,
+  so this is the inbox catching up with the rest.
+
 ### Added
 
 - **Added a Monthly repeat option** — runs on the same day of the month, clamped

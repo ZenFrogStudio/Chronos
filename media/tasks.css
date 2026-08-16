@@ -152,7 +152,9 @@ body.vscode-high-contrast-light {
    does not change where the task text wraps. Top-aligned because the text is
    several lines on a narrow sidebar and the dot and buttons belong to the
    first one. The transparent border is the selected row's border, reserved so
-   selecting a row does not shift it. */
+   selecting a row does not shift it. Clicking anywhere on the row selects the
+   task, so the hand belongs to the whole row rather than to the dot or the
+   buttons alone — the same as the manager's plan rows. */
 .task-row {
   position: relative;
   display: flex;
@@ -164,6 +166,7 @@ body.vscode-high-contrast-light {
   padding: 5px 62px 5px 8px;
   border: 1px solid transparent;
   border-radius: var(--radius);
+  cursor: pointer;
 }
 
 .task-row:hover {

@@ -145,6 +145,19 @@ describe('source guards', () => {
     }
   });
 
+  it('should_keep_the_task_rows_looking_clickable', () => {
+    // The whole row is the click target that selects a task, and the cursor is
+    // the only thing that says so — nothing in the row's paint reads as a
+    // control. Lose the declaration and the panel keeps working while looking
+    // inert, with nothing anywhere failing to say why.
+    const css = fs.readFileSync(path.join(MEDIA, 'tasks.css'), 'utf8');
+    // The base rule, not `.task-row:hover` or `.task-row.is-selected` — the
+    // space before the brace is what tells them apart.
+    const rule = css.match(/\.task-row \{[^}]*\}/)?.[0] ?? '';
+
+    assert.match(rule, /cursor:\s*pointer/, '.task-row no longer shows a hand cursor');
+  });
+
   it('should_ship_the_codicon_font_the_manager_asks_for', () => {
     // The webview may only load from media/, and the .vsix excludes
     // node_modules/, so these two are vendored rather than built. If either goes
