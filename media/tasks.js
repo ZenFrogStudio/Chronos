@@ -78,6 +78,8 @@
   function taskRow(task) {
     // A task is addressed by file name alone — no path from here ever reaches
     // the filesystem, which is what lets the host guard every read and write.
+    // One state class for the row's two visible parts, so the dot and the label
+    // can never disagree about what is happening to the task.
     const live = task.running ? ' is-running' : task.generating ? ' is-generating' : '';
     const dotTitle = task.running
       ? 'A run is in flight for this task'
@@ -89,7 +91,7 @@
     const body =
       editing && editing.name === task.name
         ? `<input class="task-edit" type="text" value="${esc(editing.text)}" aria-label="Edit task" />`
-        : `<span class="task-label">${esc(task.label)}</span>`;
+        : `<span class="task-label${live}">${esc(task.label)}</span>`;
 
     // Roving tabindex: only the selected row is in the tab order, so Tab crosses
     // the list once and the arrows move within it.

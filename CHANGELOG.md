@@ -459,6 +459,28 @@ logic out; one of the moves also narrowed a guard.
 
 ### Changed
 
+- **A task row now says what is happening to it in its own colour.** The row
+  already carried a small state dot — hollow when captured, amber while a plan
+  was being written, teal while a run was in flight — but at 9px on a sidebar
+  that is often 250px wide, it is the one part of the row you do not look at.
+  The text is what you read.
+
+  The label now takes the same state colour as the dot: amber while a planning
+  session is open for the task, green while a run fired from the inbox is in
+  flight, and the ordinary foreground colour otherwise. Both parts are driven
+  from a single class, so the dot and the text cannot end up disagreeing.
+
+  The running dot changed from teal to green to go with it. Teal is Chronos's
+  accent — buttons, outlines, links — and spending it on liveness here as well
+  made a running row read as two states at once. Green was already the manager's
+  colour for a run that is going well, taken from the theme's own chart palette
+  where the theme supplies one, so the two panels now agree. Amber is unchanged
+  and still means only one thing: a plan being written.
+
+  Colour is not the only signal in either case — the dot's pulsing halo and the
+  disabled buttons still say the same thing — so nothing in the panel depends on
+  telling amber from green.
+
 - **A generated plan is submitted without waiting for approval.** A routed
   planning session — one whose questions come out through `chronos-ask` so they
   can be answered from a phone — used to send its finished plan back as one last

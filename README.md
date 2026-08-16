@@ -43,8 +43,9 @@ Type the task in the field at the top and press Enter, or click **Add**. That is
 the whole capture step. Hover a row for the three things you can do to it:
 generate a plan, edit the text in place, or delete it.
 
-A row's dot says what is happening to it — hollow while it is only captured,
-amber and pulsing while a planning session is open for it.
+A row's colour says what is happening to it — plain with a hollow dot while it
+is only captured, amber and pulsing while a planning session is open for it,
+green while a run started from here is in flight.
 
 Press **Generate plan** (the lightbulb on a task row) and Chronos opens a
 terminal running `claude`, already working from your task. Claude can ask you

@@ -1,10 +1,11 @@
 /* Chronos task inbox — the activity-bar view. Derived from VS Code theme vars so
    it adapts to any theme, and deliberately its own small sheet rather than the
    manager's: this panel is a list, an input and a button. Chronos owns two
-   colours — sodium, spent only on liveness, which here means a plan being
-   written right now, and teal, spent on the filled primary buttons and on every
-   accent, outline and link, so that emphasis reads as ours rather than as the
-   editor's stock blue. Global values only — no component tokens. */
+   colours — sodium, spent on a plan being written right now, and teal, spent on
+   the filled primary buttons and on every accent, outline and link, so that
+   emphasis reads as ours rather than as the editor's stock blue. A run in
+   flight is green, taken from the theme's own chart palette exactly as the
+   manager takes it. Global values only — no component tokens. */
 
 :root {
   --border: var(--vscode-widget-border, color-mix(in srgb, var(--vscode-foreground) 18%, transparent));
@@ -12,18 +13,21 @@
   --sodium: #E0A458;
   --action: #0E8A8F;
   --action-hover: #12A3A9;
+  --ok: var(--vscode-charts-green, #3FB950);
   --muted: var(--vscode-descriptionForeground);
   --danger: var(--vscode-errorForeground);
   --raised: color-mix(in srgb, var(--vscode-foreground) 4%, transparent);
   --radius: 6px;
 }
 
-/* Amber and teal both need darkening to stay legible on a light background. */
+/* Amber, teal and green all need darkening to stay legible on a light
+   background. */
 body.vscode-light {
   --sodium: #9A5B0F;
   --accent: #0A6E73;
   --action: #0A6E73;
   --action-hover: #0E8A8F;
+  --ok: #1A7F37;
 }
 
 /* Never paint a brand colour over an accessibility theme. Covers light HC too,
@@ -183,6 +187,17 @@ body.vscode-high-contrast-light {
   white-space: pre-wrap;
 }
 
+/* The dot is 9px on a sidebar that is often 250px wide — easy to miss, and not
+   the part of the row you read. The state is on the text as well: amber while a
+   plan is being written for the task, green while a run is in flight. */
+.task-label.is-generating {
+  color: var(--sodium);
+}
+
+.task-label.is-running {
+  color: var(--ok);
+}
+
 .task-edit {
   flex: 1;
   min-width: 0;
@@ -195,7 +210,7 @@ body.vscode-high-contrast-light {
 }
 
 /* Same dot as a run: hollow and neutral for something merely captured, filled
-   amber with a halo while a planning session is open for it, teal while a run
+   amber with a halo while a planning session is open for it, green while a run
    fired straight from the inbox is in flight. */
 .task-dot {
   flex: none;
@@ -214,11 +229,12 @@ body.vscode-high-contrast-light {
   background: var(--sodium);
 }
 
-/* Teal rather than amber: sodium is spent on a plan being written, and this is a
-   run in flight, which is what teal marks everywhere else in the product. */
+/* Green rather than amber: sodium is spent on a plan being written, and this is
+   a run in flight. Green rather than teal so the dot agrees with the label
+   beside it — a row should read as one state, not two. */
 .task-dot.is-running {
-  border-color: var(--accent);
-  background: var(--accent);
+  border-color: var(--ok);
+  background: var(--ok);
 }
 
 .task-dot.is-generating::after,
@@ -236,7 +252,7 @@ body.vscode-high-contrast-light {
 }
 
 .task-dot.is-running::after {
-  border-color: var(--accent);
+  border-color: var(--ok);
 }
 
 @keyframes halo {
