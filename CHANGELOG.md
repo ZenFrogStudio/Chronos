@@ -22,6 +22,36 @@ logic out; one of the moves also narrowed a guard.
 
 ### Added
 
+- **A standing weekly security review.** Chronos runs a coding agent with
+  filesystem and shell access, on a schedule, while nobody is at the machine. A
+  defect in its path handling, its command building or its MCP surface is
+  reached by a plan file rather than by a person, so ordinary use of the product
+  never finds it. `docs/WEEKLY-SECURITY-REVIEW.md` is the plan that goes looking
+  on purpose: it runs every Monday at 08:00, walks a fixed route through the
+  webview message surface, path containment, command construction, the MCP and
+  remote-command channels, CSP, logging, permission modes and state integrity,
+  and writes one dated report to `.chronos/audits/`.
+
+  It changes no code, and everything it writes lands inside `.chronos`, which is
+  git-ignored — a run leaves the working tree exactly as it found it.
+
+  The new half is that each of the top findings becomes both an inbox task and a
+  ready-to-run fix plan in the library, so acting on one is a single click. What
+  it deliberately does not do is schedule them. A review that could put its own
+  conclusions on the schedule would be an agent granting itself recurring write
+  access to the repository on the strength of its own reasoning — the same gate
+  Chronos already enforces on itself, where an agent may author a plan over MCP
+  but may not set its permission mode. A person reads a fix plan and presses
+  Schedule.
+
+  This retires the combined security/performance/functionality audit, which ran
+  twice. Security is now its own standing plan and its reports continue the same
+  `.chronos/audits/` series, so the security findings of the two existing
+  `*-codebase-audit.md` reports are read for continuity and de-duplication
+  rather than being started over. Performance becomes its own plan later, and
+  will share the same audits folder and the same de-duplication rules so nothing
+  is raised twice.
+
 - **A separate Reinstall closing step, alongside Rebuild.** A generated plan
   could already be asked to end by rebuilding the project, which for anything
   that ships as an installed artefact — an extension, a CLI, a packaged app —
