@@ -21,3 +21,9 @@ dist-test/
 # landing page live in `site/img/`.
 media/screenshots.png
 media/screenshots-2.png
+
+# Plans stay on disk and out of git. The live library under `.chronos/plans` is
+# already covered above; these are the design plans written before the code was
+# built, kept as a personal record rather than as anything the repo builds from.
+docs/PLAN.md
+docs/*-PLAN.md
