@@ -21,6 +21,3 @@ dist-test/
 # landing page live in `site/img/`.
 media/screenshots.png
 media/screenshots-2.png
-
-# Scratch image exports that nothing references.
-src/img/Gemini_Generated_Image_*

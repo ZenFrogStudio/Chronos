@@ -8,6 +8,12 @@
 # line every install ships one developer's private work.
 .chronos/**
 favicon.ico
+# The raw manager and Tasks captures. Nothing in the extension loads them, and
+# they are the unblurred originals: a real working-directory path and a real
+# seven-day spend figure. They were half the size of the package. The blurred
+# copies the landing page publishes live in `site/img/`, which is excluded below.
+media/screenshots.png
+media/screenshots-2.png
 # The landing page is repo-only — a static site Cloudflare Pages serves from
 # GitHub. It must never ship inside the .vsix.
 site/**
