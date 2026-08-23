@@ -25,10 +25,11 @@ inline `<style>` or `<script>`, change the markup rather than the policy.
 
 ## The screenshots
 
-`img/manager.png` and `img/tasks.png` are copies of `media/screenshots.png` and
-`media/screenshots-2.png` from the repo root.
+`img/manager.png` and `img/tasks.png` are the only screenshots in the repo, and
+**both are redacted.** The working-directory path and the rolling seven-day cost
+figure are blurred out of `img/manager.png`.
 
-**The copy in `img/` is redacted.** The working-directory path and the rolling
-seven-day cost figure are blurred out of `img/manager.png`. The original in
-`media/` is not. Anyone replacing this screenshot with a fresh capture must blur
-both again before it is published.
+The unblurred originals stay out of git — `.gitignore` keeps
+`media/screenshots.png` and `media/screenshots-2.png` untracked, because a raw
+capture shows a real filesystem path and a real spend figure. Anyone taking a
+fresh capture blurs both before copying it into `img/`.

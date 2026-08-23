@@ -5,3 +5,22 @@ dist-test/
 .DS_Store
 .sandbox/*
 !.sandbox/README.md
+
+# Chronos scheduling its own repository writes this developer's plans,
+# transcripts, logs and schedule here. `.chronos/.gitignore` holds a `*` too,
+# but that file is written by the extension at runtime — if it is ever missing
+# on a fresh clone, this line is what stops the private work being committed.
+.chronos/
+
+# Local agent tooling: slash commands and settings for whoever is driving the
+# editor. Not part of the extension, and it names one person's setup.
+.claude/
+
+# Unredacted manager and Tasks captures. They show a real working-directory
+# path and a real seven-day spend figure. The blurred copies published on the
+# landing page live in `site/img/`.
+media/screenshots.png
+media/screenshots-2.png
+
+# Scratch image exports that nothing references.
+src/img/Gemini_Generated_Image_*

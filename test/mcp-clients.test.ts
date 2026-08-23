@@ -10,10 +10,10 @@ import { MCP_CLIENTS, McpClient, SERVER_NAME } from '../src/mcp-clients';
  * tools simply never appear, and there is nothing in any log to read. So the
  * paths fed in are the awkward ones on purpose: a Windows path with backslashes
  * and a space in it, which is what an install under "Program Files" or a user
- * folder called "One Media Labs" actually looks like.
+ * folder called "Ada Lovelace" actually looks like.
  */
 
-const SERVER = 'C:\\Users\\One Media Labs\\AppData\\Roaming\\Code\\User\\globalStorage\\z3n.chronos\\mcp-server.js';
+const SERVER = 'C:\\Users\\Ada Lovelace\\AppData\\Roaming\\Code\\User\\globalStorage\\z3n.chronos\\mcp-server.js';
 const FOLDER = 'D:\\03-Software\\My Project';
 
 const byId = (id: string): McpClient => {

@@ -732,7 +732,7 @@ describe('shellKind', () => {
 describe('mcp client config', () => {
   // The awkward paths on purpose, as in `mcp-clients.test.ts`: a config that
   // parses cleanly and points at nothing fails silently at both ends.
-  const SERVER_JS = 'C:\\Users\\One Media Labs\\globalStorage\\z3n.chronos\\mcp-server.js';
+  const SERVER_JS = 'C:\\Users\\Ada Lovelace\\globalStorage\\z3n.chronos\\mcp-server.js';
   const FOLDER = 'D:\\03-Software\\My Project';
 
   const parse = (json: string) => JSON.parse(json) as {
